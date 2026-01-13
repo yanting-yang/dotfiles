@@ -1,3 +1,8 @@
+[general]
+import = [
+"catppuccin-mocha.toml",
+]
+
 [window]
 decorations =  "None"
 startup_mode = "Maximized"
