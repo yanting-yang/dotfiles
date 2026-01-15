@@ -84,3 +84,4 @@ if ! shopt -oq posix; then
 fi
 
 export PATH="$HOME/.local/bin:$PATH"
+export LESSHISTFILE=$HOME/.local/state/lesshst
