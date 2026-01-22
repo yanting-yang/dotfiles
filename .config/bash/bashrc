@@ -69,9 +69,7 @@ if [ -x /usr/bin/dircolors ]; then
 fi
 
 # Alias definitions.
-if [ -f "$HOME/.config/bash/bash_aliases" ]; then
-    . "$HOME/.config/bash/bash_aliases"
-fi
+alias wget='wget --hsts-file="$HOME/.local/state/wget-hsts"'
 
 # enable programmable completion features (you don't need to enable
 # this, if it's already enabled in /etc/bash.bashrc and /etc/profile
@@ -84,5 +82,4 @@ if ! shopt -oq posix; then
   fi
 fi
 
-export PATH="$HOME/.local/bin:$PATH"
 export LESSHISTFILE="$HOME/.local/state/lesshst"
