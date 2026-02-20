@@ -6,7 +6,7 @@ vim.opt.scrolloff = 5
 vim.opt.shiftwidth = 4
 vim.opt.showtabline = 2
 vim.opt.signcolumn = 'yes'
-vim.opt.statusline = '[fenc=%{&fenc}, ff=%{&ff}, ft=%{&ft}]%=%-14.(%l,%c%V%) %P'
+vim.opt.statusline = '%{&fenc}|%{&ff}|%{&ft}%=%-14.(%l,%c%V%) %P'
 vim.opt.tabstop = 4
 vim.opt.winbar = '%f %m%r'
 vim.opt.relativenumber = true
