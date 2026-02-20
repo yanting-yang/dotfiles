@@ -1,13 +1,5 @@
 #!/bin/bash
 
-# Check for required dependencies
-for cmd in curl stow; do
-    if ! command -v "$cmd" &> /dev/null; then
-        echo "Error: $cmd is not installed. Please install it and try again."
-        exit 1
-    fi
-done
-
 echo "Install GitHub CLI"
 if [ -d $HOME/.local/stow/gh ]; then
     stow -d "$HOME/.local/stow" -D gh
