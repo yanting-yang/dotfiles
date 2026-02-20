@@ -24,7 +24,35 @@ if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
     debian_chroot=$(cat /etc/debian_chroot)
 fi
 
-PS1='\n${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
+# 1. Capture the start time before the command runs
+function timer_start() {
+    if [ -z "$_cmd_start_time" ]; then
+        _cmd_start_time=$SECONDS
+    fi
+}
+trap 'timer_start' DEBUG
+
+# 2. Calculate the duration after the command finishes
+function timer_calc() {
+    _cmd_duration_str=""
+
+    local delta=$((SECONDS - _cmd_start_time))
+    unset _cmd_start_time # Reset the timer in the main shell
+
+    local hours=$((delta / 3600))
+    local mins=$(( (delta % 3600) / 60 ))
+    local secs=$((delta % 60))
+
+    _cmd_duration_str="["
+    (( hours > 0 )) && _cmd_duration_str+="${hours}h "
+    (( mins > 0 )) && _cmd_duration_str+="${mins}m "
+    _cmd_duration_str+="${secs}s]"
+}
+
+# 3. Tell bash to run the calculation right before drawing the prompt
+PROMPT_COMMAND="timer_calc; ${PROMPT_COMMAND}"
+
+PS1='${_cmd_duration_str}\n\n${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
 
 # If this is an xterm set the title to user@host:dir
 case "$TERM" in
