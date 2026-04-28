@@ -80,4 +80,7 @@ export NVM_DIR="$HOME/.config/nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 
 # cuda
-export PATH=/usr/local/cuda/bin:$PATH
+export PATH="/usr/local/cuda/bin:$PATH"
+
+# texlive
+export PATH="/usr/local/texlive/2026/bin/x86_64-linux:$PATH"
