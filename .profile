@@ -8,3 +8,6 @@ fi
 
 # set PATH so it includes user's private bin
 export PATH="$HOME/.local/bin:$PATH"
+
+# Show welcome message
+. "$HOME/dotfiles/welcome.sh"

@@ -2,7 +2,11 @@
 
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
+
+HR='────────────────────────────────────────────────'
 
 print_latest() {
     local current="$1" latest="$2"
@@ -35,6 +39,12 @@ check_cmd() {
     fi
     echo
 }
+
+# code (installed directly to $HOME/code, not in PATH)
+printf "${BOLD}${CYAN}┌%s┐${NC}\n" "$HR"
+printf "${BOLD}${CYAN}│${NC}  %-46s${BOLD}${CYAN}│${NC}\n" "$(whoami)@$(hostname -s)  $(date '+%a %b %d %Y %H:%M')"
+printf "${BOLD}${CYAN}└%s┘${NC}\n" "$HR"
+echo
 
 # code (installed directly to $HOME/code, not in PATH)
 CODE_BIN="$HOME/code"
@@ -87,3 +97,5 @@ check_cmd "stow" "stow" "$STOW_CURRENT" "$STOW_LATEST"
 TMUX_CURRENT=$(tmux -V 2>/dev/null | awk '{print $2}')
 TMUX_LATEST=$(get_github_latest https://github.com/tmux/tmux-builds)
 check_cmd "tmux" "tmux" "$TMUX_CURRENT" "$TMUX_LATEST"
+
+printf "${BOLD}${CYAN}└%s┘${NC}\n" "$HR"
