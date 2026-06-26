@@ -9,5 +9,11 @@ fi
 # set PATH so it includes user's private bin
 export PATH="$HOME/.local/bin:$PATH"
 
-# Show welcome message
-. "$HOME/dotfiles/welcome.sh"
+# Show welcome message for interactive shells, but not inside tmux panes/windows.
+case $- in
+    *i*)
+        if [ -z "$TMUX" ]; then
+            . "$HOME/dotfiles/welcome.sh"
+        fi
+        ;;
+esac
