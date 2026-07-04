@@ -19,6 +19,12 @@ if [ "$code_running_status" -eq 2 ]; then
     die "could not check whether code is running; skipping update"
 fi
 
-require_command curl tar
-curl -Ls "$URL" | tar xz -C "$HOME"
-rm -rf "$HOME/.vscode/"* "$HOME/.vscode-server/"*
+require_command cp find
+TEMP_DIR=$(make_temp_dir)
+trap 'cleanup_temp_dir "$TEMP_DIR"' EXIT
+
+download_tar_to_dir "$URL" "$TEMP_DIR"
+[ -x "$TEMP_DIR/code" ] || die "downloaded code archive did not contain an executable code binary"
+cp "$TEMP_DIR/code" "$HOME/code"
+clear_dir_contents "$HOME/.vscode"
+clear_dir_contents "$HOME/.vscode-server"

@@ -4,11 +4,12 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../lib/install.sh"
 
-TEMP_DIR=$(mktemp -d)
+require_command make
+
+TEMP_DIR=$(make_temp_dir)
 trap 'cleanup_temp_dir "$TEMP_DIR"' EXIT
 
-require_command curl make mktemp tar
-curl -Ls "https://ftp.gnu.org/gnu/stow/stow-latest.tar.gz" | tar xz --strip-components=1 -C "$TEMP_DIR"
+download_tar_to_dir "https://ftp.gnu.org/gnu/stow/stow-latest.tar.gz" "$TEMP_DIR" --strip-components=1
 
 cd "$TEMP_DIR"
 ./configure --prefix="$LOCAL_PREFIX"

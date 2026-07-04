@@ -26,6 +26,36 @@ require_command() {
     done
 }
 
+make_temp_dir() {
+    require_command mktemp
+    mktemp -d
+}
+
+download_tar_to_dir() {
+    local url="$1" target_dir="$2"
+    shift 2
+
+    require_command curl tar
+    mkdir -p "$target_dir"
+    curl -fLs "$url" | tar xz "$@" -C "$target_dir"
+}
+
+copy_dir_contents() {
+    local source_dir="$1" target_dir="$2"
+
+    require_command cp
+    mkdir -p "$target_dir"
+    cp -a "$source_dir/." "$target_dir/"
+}
+
+clear_dir_contents() {
+    local target_dir="$1"
+
+    [ -d "$target_dir" ] || return 0
+    require_command find
+    find "$target_dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+}
+
 latest_github_tag() {
     local repo="$1" latest
 

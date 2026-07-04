@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
 
-NVM_TUI_RED=$'\033[0;31m'
-NVM_TUI_GREEN=$'\033[0;32m'
-NVM_TUI_YELLOW=$'\033[0;33m'
-NVM_TUI_CYAN=$'\033[0;36m'
-NVM_TUI_BOLD=$'\033[1m'
-NVM_TUI_DIM=$'\033[2m'
-NVM_TUI_REV=$'\033[7m'
-NVM_TUI_NC=$'\033[0m'
-
 NVM_TUI_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 NVM_TUI_NVM_DIR="${NVM_DIR:-$HOME/.config/nvm}"
 NVM_TUI_INSTALLED=()
@@ -24,53 +15,17 @@ NVM_TUI_REMOTE_ERROR=""
 NVM_TUI_SOURCED=0
 [ "${#BASH_SOURCE[@]}" -gt 1 ] && NVM_TUI_SOURCED=1
 
-nvm_tui_repeat_char() {
-    local char="$1" count="$2"
-    local output="" i
+# shellcheck source=scripts/lib/tui.sh
+source "$NVM_TUI_DIR/scripts/lib/tui.sh"
 
-    for ((i = 0; i < count; i++)); do
-        output+="$char"
-    done
-
-    printf '%s' "$output"
-}
-
-nvm_tui_truncate() {
-    local value="$1" width="$2"
-
-    if [ "$width" -le 3 ]; then
-        printf '%.*s' "$width" "$value"
-    elif [ "${#value}" -gt "$width" ]; then
-        printf '%s...' "${value:0:$((width - 3))}"
-    else
-        printf '%s' "$value"
-    fi
-}
-
-nvm_tui_cols() {
-    local cols
-
-    cols=$(tput cols 2>/dev/null || printf '100')
-    [[ "$cols" =~ ^[0-9]+$ ]] || cols=100
-    [ "$cols" -ge 60 ] || cols=60
-    printf '%s' "$cols"
-}
-
-nvm_tui_lines() {
-    local lines
-
-    lines=$(tput lines 2>/dev/null || printf '24')
-    [[ "$lines" =~ ^[0-9]+$ ]] || lines=24
-    [ "$lines" -ge 12 ] || lines=12
-    printf '%s' "$lines"
-}
-
-nvm_tui_supports_tui() {
-    [ -t 0 ] \
-        && [ -t 1 ] \
-        && command -v tput >/dev/null 2>&1 \
-        && [ "${TERM:-dumb}" != "dumb" ]
-}
+NVM_TUI_RED="$TUI_RED"
+NVM_TUI_GREEN="$TUI_GREEN"
+NVM_TUI_YELLOW="$TUI_YELLOW"
+NVM_TUI_CYAN="$TUI_CYAN"
+NVM_TUI_BOLD="$TUI_BOLD"
+NVM_TUI_DIM="$TUI_DIM"
+NVM_TUI_REV="$TUI_REV"
+NVM_TUI_NC="$TUI_NC"
 
 nvm_tui_is_sourced() {
     [ "$NVM_TUI_SOURCED" -eq 1 ]
@@ -174,6 +129,14 @@ nvm_tui_load_remote_versions() {
     NVM_TUI_REMOTE_LOADED=1
 }
 
+nvm_tui_clear_remote_versions() {
+    NVM_TUI_REMOTE=()
+    NVM_TUI_LTS_VERSIONS=()
+    NVM_TUI_LTS_LABELS=()
+    NVM_TUI_REMOTE_LOADED=0
+    NVM_TUI_REMOTE_ERROR=""
+}
+
 nvm_tui_lts_label_for() {
     local version="$1" i
 
@@ -243,41 +206,6 @@ nvm_tui_first_selected() {
     printf '0'
 }
 
-nvm_tui_read_key() {
-    local key rest
-
-    if ! IFS= read -rsn1 key; then
-        return 1
-    fi
-
-    if [ "$key" = $'\033' ]; then
-        if IFS= read -rsn2 -t 0.05 rest; then
-            case "$rest" in
-                '[A')
-                    printf 'up'
-                    ;;
-                '[B')
-                    printf 'down'
-                    ;;
-                *)
-                    printf 'escape'
-                    ;;
-            esac
-        else
-            printf 'escape'
-        fi
-    elif [ "$key" = $'\r' ] || [ "$key" = $'\n' ] || [ -z "$key" ]; then
-        printf 'enter'
-    else
-        printf '%s' "$key"
-    fi
-}
-
-nvm_tui_pause() {
-    printf '\n%s' "Press any key to return to nvm."
-    nvm_tui_read_key >/dev/null 2>&1 || true
-}
-
 nvm_tui_print_status() {
     local width="$1" status="$2"
 
@@ -311,7 +239,7 @@ nvm_tui_render_row() {
     version="${NVM_TUI_VERSIONS[$index]}"
     status="${NVM_TUI_STATUSES[$index]}"
     lts="${NVM_TUI_LTS[$index]}"
-    path=$(nvm_tui_truncate "$(nvm_tui_version_path "$version" "$status")" "$path_width")
+    path=$(tui_truncate "$(nvm_tui_version_path "$version" "$status")" "$path_width")
     [ "$index" -eq "$selected" ] && marker='>'
 
     if [ "$index" -eq "$selected" ]; then
@@ -331,14 +259,14 @@ nvm_tui_render() {
     local selected="$1" message="${2:-}"
     local cols lines path_width rule visible_rows row_count start end i
 
-    cols=$(nvm_tui_cols)
-    lines=$(nvm_tui_lines)
+    cols=$(tui_cols)
+    lines=$(tui_lines)
     path_width=$((cols - 44))
     [ "$path_width" -ge 16 ] || path_width=16
     [ "$path_width" -le 100 ] || path_width=100
     visible_rows=$((lines - 11))
     [ "$visible_rows" -ge 4 ] || visible_rows=4
-    rule=$(nvm_tui_repeat_char '─' "$cols")
+    rule=$(tui_repeat_char '─' "$cols")
     row_count="${#NVM_TUI_VERSIONS[@]}"
 
     if [ "$row_count" -le "$visible_rows" ]; then
@@ -351,19 +279,19 @@ nvm_tui_render() {
         end=$((start + visible_rows - 1))
     fi
 
-    tput clear 2>/dev/null || true
+    tui_clear
     printf "${NVM_TUI_BOLD}${NVM_TUI_CYAN}nvm Node versions${NVM_TUI_NC}  current: %s\n" "$NVM_TUI_CURRENT"
     printf "${NVM_TUI_DIM}%s${NVM_TUI_NC}\n" "$rule"
     printf "${NVM_TUI_DIM}j/k move  Enter use/install  i install prompt  d uninstall  r refresh remote  q back${NVM_TUI_NC}\n\n"
 
     if [ "$row_count" -eq 0 ]; then
         printf "${NVM_TUI_YELLOW}No Node versions were found.${NVM_TUI_NC}\n"
-        printf "${NVM_TUI_DIM}Press r to retry nvm ls-remote, or i to install a version such as lts/*.${NVM_TUI_NC}\n"
+        printf "${NVM_TUI_DIM}Press r to load remote versions, or i to install a version such as lts/*.${NVM_TUI_NC}\n"
     else
         printf "${NVM_TUI_BOLD}%-2s %-14s %-10s %-12s %-*s${NVM_TUI_NC}\n" \
             "" "version" "status" "lts" "$path_width" "path"
         printf "${NVM_TUI_DIM}%-2s %-14s %-10s %-12s %-*s${NVM_TUI_NC}\n" \
-            "" "-------" "------" "---" "$path_width" "$(nvm_tui_repeat_char '-' "$path_width")"
+            "" "-------" "------" "---" "$path_width" "$(tui_repeat_char '-' "$path_width")"
 
         for ((i = start; i <= end; i++)); do
             nvm_tui_render_row "$i" "$selected" "$path_width"
@@ -378,6 +306,8 @@ nvm_tui_render() {
         printf "${NVM_TUI_DIM}remote versions loaded from nvm ls-remote${NVM_TUI_NC}\n"
     elif [ -n "$NVM_TUI_REMOTE_ERROR" ]; then
         printf "${NVM_TUI_YELLOW}%s${NVM_TUI_NC}\n" "$NVM_TUI_REMOTE_ERROR"
+    else
+        printf "${NVM_TUI_DIM}local versions only; press r to load remote versions${NVM_TUI_NC}\n"
     fi
 
     if [ -n "$message" ]; then
@@ -397,7 +327,7 @@ nvm_tui_install_version() {
 nvm_tui_install_prompt() {
     local version
 
-    tput clear 2>/dev/null || true
+    tui_clear
     printf "${NVM_TUI_BOLD}Install Node version${NVM_TUI_NC}\n"
     printf "${NVM_TUI_DIM}Examples: lts/*, node, 22, 22.12.0${NVM_TUI_NC}\n\n"
     printf 'Version to install [lts/*]: '
@@ -417,7 +347,7 @@ nvm_tui_use_selected() {
     version="${NVM_TUI_VERSIONS[$selected]}"
     status="${NVM_TUI_STATUSES[$selected]}"
 
-    tput clear 2>/dev/null || true
+    tui_clear
     if [ "$status" = "available" ]; then
         nvm_tui_install_version "$version"
     else
@@ -443,7 +373,7 @@ nvm_tui_uninstall_selected() {
         return 1
     fi
 
-    tput clear 2>/dev/null || true
+    tui_clear
     printf "${NVM_TUI_BOLD}Uninstall Node %s?${NVM_TUI_NC} [y/N] " "$version"
     if ! IFS= read -r answer; then
         return 1
@@ -469,9 +399,10 @@ run_nvm_tui() {
         return 1
     fi
 
-    nvm_tui_refresh_versions 1
+    nvm_tui_clear_remote_versions
+    nvm_tui_refresh_versions 0
 
-    if ! nvm_tui_supports_tui; then
+    if ! tui_supports; then
         printf 'current: %s\n' "$NVM_TUI_CURRENT"
         printf '%-14s %-10s %-12s\n' "version" "status" "lts"
         for selected in "${!NVM_TUI_VERSIONS[@]}"; do
@@ -495,7 +426,7 @@ run_nvm_tui() {
         fi
 
         nvm_tui_render "$selected" "$message"
-        if ! key=$(nvm_tui_read_key); then
+        if ! key=$(tui_read_key); then
             break
         fi
 
@@ -510,17 +441,17 @@ run_nvm_tui() {
             enter)
                 if [ "$row_count" -gt 0 ]; then
                     nvm_tui_use_selected "$selected" || true
-                    nvm_tui_pause
+                    tui_pause nvm
                     nvm_tui_refresh_versions 0
                     selected=$(nvm_tui_first_selected)
                     message="${NVM_TUI_GREEN}Selected Node ${NVM_TUI_CURRENT}.${NVM_TUI_NC}"
                 else
-                    message="${NVM_TUI_YELLOW}No versions to use or install. Press r to retry remote lookup.${NVM_TUI_NC}"
+                    message="${NVM_TUI_YELLOW}No versions to use or install. Press r to load remote versions.${NVM_TUI_NC}"
                 fi
                 ;;
             i|I)
                 nvm_tui_install_prompt || true
-                nvm_tui_pause
+                tui_pause nvm
                 nvm_tui_refresh_versions 0
                 selected=$(nvm_tui_first_selected)
                 message="${NVM_TUI_GREEN}Versions refreshed.${NVM_TUI_NC}"
@@ -528,7 +459,7 @@ run_nvm_tui() {
             d|D|x|X)
                 if [ "$row_count" -gt 0 ]; then
                     nvm_tui_uninstall_selected "$selected" || true
-                    nvm_tui_pause
+                    tui_pause nvm
                     nvm_tui_refresh_versions 0
                     selected=$(nvm_tui_first_selected)
                     message="${NVM_TUI_GREEN}Versions refreshed.${NVM_TUI_NC}"
@@ -537,7 +468,7 @@ run_nvm_tui() {
                 fi
                 ;;
             r|R)
-                tput clear 2>/dev/null || true
+                tui_clear
                 printf '%sLoading nvm ls-remote...%s\n' "$NVM_TUI_DIM" "$NVM_TUI_NC"
                 nvm_tui_refresh_versions 1
                 selected=$(nvm_tui_first_selected)
@@ -556,7 +487,7 @@ if ! nvm_tui_is_sourced; then
     run_nvm_tui
     nvm_tui_rc=$?
 
-    if [ "$nvm_tui_rc" -eq 0 ] && nvm_tui_supports_tui && [ -f "$NVM_TUI_DIR/welcome.sh" ]; then
+    if [ "$nvm_tui_rc" -eq 0 ] && tui_supports && [ -f "$NVM_TUI_DIR/welcome.sh" ]; then
         # shellcheck source=/dev/null
         source "$NVM_TUI_DIR/welcome.sh"
     fi
