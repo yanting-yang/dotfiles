@@ -12,9 +12,13 @@ NC=$'\033[0m'
 DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 INSTALL_DIR="$DOTFILES_DIR/scripts/install"
 TUI_DIR="$DOTFILES_DIR/scripts/tui"
+CODE_LIB="$DOTFILES_DIR/scripts/lib/code.sh"
 NVM_TUI="$TUI_DIR/nvm.sh"
 LATEST_UNCHECKED="unchecked"
 WELCOME_CHECK_UPDATES=0
+
+# shellcheck source=scripts/lib/code.sh
+source "$CODE_LIB"
 
 COMMANDS=()
 PATHS=()
@@ -351,11 +355,25 @@ first_actionable_row() {
 
 run_installer() {
     local index="$1" installer="${INSTALLERS[$1]}"
-    local rc
+    local code_running_status rc
 
     if [ ! -f "$installer" ]; then
         printf "${RED}No installer found:${NC} %s\n" "$installer"
         return 1
+    fi
+
+    if [ "${COMMANDS[$index]}" = "code" ]; then
+        if code_is_running; then
+            printf "${YELLOW}code is running; skipping update.${NC}\n"
+            return 0
+        else
+            code_running_status=$?
+        fi
+
+        if [ "$code_running_status" -eq 2 ]; then
+            printf "${YELLOW}Could not check whether code is running; skipping update.${NC}\n"
+            return 0
+        fi
     fi
 
     printf '\n%sInstalling latest %s...%s\n' "$BOLD" "${COMMANDS[$index]}" "$NC"
