@@ -9,11 +9,20 @@ fi
 # set PATH so it includes user's private bin
 export PATH="$HOME/.local/bin:$PATH"
 
-# Show welcome message for interactive shells, but not inside tmux panes/windows.
+# Ask before showing the welcome message for interactive bash shells outside tmux.
 case $- in
     *i*)
-        if [ -z "$TMUX" ]; then
-            . "$HOME/dotfiles/welcome.sh"
+        if [ -z "$TMUX" ] && [ -n "$BASH_VERSION" ] && [ -t 0 ]; then
+            printf 'Show welcome message? [Y/n] '
+            if IFS= read -r -t 3 show_welcome; then
+                case "$show_welcome" in
+                    ''|[Yy]|[Yy][Ee][Ss])
+                        . "$HOME/dotfiles/welcome.sh"
+                        ;;
+                esac
+            else
+                printf '\n'
+            fi
         fi
         ;;
 esac
