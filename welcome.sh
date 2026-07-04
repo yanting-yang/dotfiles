@@ -11,6 +11,10 @@ NC=$'\033[0m'
 
 DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 INSTALL_DIR="$DOTFILES_DIR/scripts/install"
+TUI_DIR="$DOTFILES_DIR/scripts/tui"
+NVM_TUI="$TUI_DIR/nvm.sh"
+LATEST_UNCHECKED="unchecked"
+WELCOME_CHECK_UPDATES=0
 
 COMMANDS=()
 PATHS=()
@@ -99,6 +103,7 @@ latest_is_newer() {
     local current="$1" latest="$2"
 
     [ -n "$latest" ] \
+        && [ "$latest" != "$LATEST_UNCHECKED" ] \
         && [ "$latest" != "unknown" ] \
         && [ "$current" != "unknown" ] \
         && [ "$latest" != "$current" ]
@@ -109,6 +114,8 @@ row_status() {
 
     if [ "$path" = "not installed" ]; then
         printf 'missing'
+    elif [ "$latest" = "$LATEST_UNCHECKED" ]; then
+        printf 'installed'
     elif latest_is_newer "$current" "$latest"; then
         printf 'update'
     elif [ "$latest" = "unknown" ] || [ "$current" = "unknown" ]; then
@@ -159,6 +166,7 @@ add_cmd_row() {
 }
 
 load_rows() {
+    local include_updates="${1:-0}"
     local code_latest code_current
     local gh_latest gh_current
     local nvim_latest nvim_current
@@ -169,7 +177,8 @@ load_rows() {
 
     clear_rows
 
-    code_latest=$(get_github_latest https://github.com/microsoft/vscode)
+    code_latest="$LATEST_UNCHECKED"
+    [ "$include_updates" -eq 1 ] && code_latest=$(get_github_latest https://github.com/microsoft/vscode)
     if [ -x "$code_bin" ]; then
         code_current=$("$code_bin" --version 2>/dev/null | head -1 | awk '{print $2}')
         add_row "code" "$code_bin" "$code_current" "$code_latest" "$INSTALL_DIR/code.sh"
@@ -177,7 +186,8 @@ load_rows() {
         add_missing_row "code" "$code_latest" "$INSTALL_DIR/code.sh"
     fi
 
-    gh_latest=$(get_github_latest https://github.com/cli/cli)
+    gh_latest="$LATEST_UNCHECKED"
+    [ "$include_updates" -eq 1 ] && gh_latest=$(get_github_latest https://github.com/cli/cli)
     if command -v gh >/dev/null 2>&1; then
         gh_current=$(gh --version 2>/dev/null | awk 'NR==1{print $3}')
         add_cmd_row "gh" "gh" "$gh_current" "$gh_latest" "$INSTALL_DIR/gh.sh"
@@ -185,7 +195,8 @@ load_rows() {
         add_missing_row "gh" "$gh_latest" "$INSTALL_DIR/gh.sh"
     fi
 
-    nvim_latest=$(get_github_latest https://github.com/neovim/neovim)
+    nvim_latest="$LATEST_UNCHECKED"
+    [ "$include_updates" -eq 1 ] && nvim_latest=$(get_github_latest https://github.com/neovim/neovim)
     if command -v nvim >/dev/null 2>&1; then
         nvim_current=$(NVIM_LOG_FILE="${NVIM_LOG_FILE:-/tmp/nvim-welcome.log}" nvim --version 2>/dev/null \
             | awk 'NR==1{print $2}' \
@@ -195,7 +206,8 @@ load_rows() {
         add_missing_row "nvim" "$nvim_latest" "$INSTALL_DIR/nvim.sh"
     fi
 
-    nvm_latest=$(get_github_latest https://github.com/nvm-sh/nvm)
+    nvm_latest="$LATEST_UNCHECKED"
+    [ "$include_updates" -eq 1 ] && nvm_latest=$(get_github_latest https://github.com/nvm-sh/nvm)
     nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
     if [ -s "$nvm_dir/nvm.sh" ]; then
         # shellcheck source=/dev/null
@@ -206,7 +218,8 @@ load_rows() {
         add_missing_row "nvm" "$nvm_latest" "$INSTALL_DIR/nvm.sh"
     fi
 
-    stow_latest=$(get_stow_latest)
+    stow_latest="$LATEST_UNCHECKED"
+    [ "$include_updates" -eq 1 ] && stow_latest=$(get_stow_latest)
     if command -v stow >/dev/null 2>&1; then
         stow_current=$(stow --version 2>/dev/null | grep -oE '[0-9.]+' | head -1)
         add_cmd_row "stow" "stow" "$stow_current" "$stow_latest" "$INSTALL_DIR/stow.sh"
@@ -214,7 +227,8 @@ load_rows() {
         add_missing_row "stow" "$stow_latest" "$INSTALL_DIR/stow.sh"
     fi
 
-    tmux_latest=$(get_github_latest https://github.com/tmux/tmux-builds)
+    tmux_latest="$LATEST_UNCHECKED"
+    [ "$include_updates" -eq 1 ] && tmux_latest=$(get_github_latest https://github.com/tmux/tmux-builds)
     if command -v tmux >/dev/null 2>&1; then
         tmux_current=$(tmux -V 2>/dev/null | awk '{print $2}')
         add_cmd_row "tmux" "tmux" "$tmux_current" "$tmux_latest" "$INSTALL_DIR/tmux.sh"
@@ -234,6 +248,9 @@ print_status() {
             printf "${YELLOW}%-*s${NC}" "$width" "$status"
             ;;
         current)
+            printf "${GREEN}%-*s${NC}" "$width" "$status"
+            ;;
+        installed)
             printf "${GREEN}%-*s${NC}" "$width" "$status"
             ;;
         *)
@@ -302,7 +319,10 @@ row_is_actionable() {
     [ -n "${INSTALLERS[$index]}" ] || return 1
     [ "${PATHS[$index]}" = "not installed" ] && return 0
     latest_is_newer "${CURRENTS[$index]}" "${LATESTS[$index]}" && return 0
-    [ "${CURRENTS[$index]}" = "unknown" ] && [ "${LATESTS[$index]}" != "unknown" ] && return 0
+    [ "${CURRENTS[$index]}" = "unknown" ] \
+        && [ "${LATESTS[$index]}" != "unknown" ] \
+        && [ "${LATESTS[$index]}" != "$LATEST_UNCHECKED" ] \
+        && return 0
     return 1
 }
 
@@ -355,6 +375,33 @@ run_installer() {
     return "$rc"
 }
 
+open_nvm_tui() {
+    local rc=0
+
+    tput clear 2>/dev/null || true
+    if [ ! -f "$NVM_TUI" ]; then
+        printf "${RED}No nvm TUI found:${NC} %s\n" "$NVM_TUI"
+        pause_for_tui
+        return 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$NVM_TUI"
+    NVM_TUI_PARENT="welcome"
+    run_nvm_tui || rc=$?
+    unset NVM_TUI_PARENT
+
+    if [ "$rc" -ne 0 ]; then
+        pause_for_tui
+    fi
+
+    tput clear 2>/dev/null || true
+    printf '%sRefreshing status...%s\n' "$DIM" "$NC"
+    WELCOME_CHECK_UPDATES=0
+    load_rows 0
+    return "$rc"
+}
+
 render_tui_row() {
     local index="$1" selected="$2" path_width="$3"
     local marker=' ' path status
@@ -396,7 +443,7 @@ render_tui() {
     tput clear 2>/dev/null || true
     printf "${BOLD}${CYAN}Welcome${NC}  %s\n" "$title"
     printf "${DIM}%s${NC}\n" "$rule"
-    printf "${DIM}Up/Down or j/k select  Enter install selected  a install all  r refresh  q quit${NC}\n\n"
+    printf "${DIM}j/k move  Enter install/update  / commands  r refresh local  q quit${NC}\n\n"
 
     printf "${BOLD}%-2s %-7s %-8s %-10s %-10s %-*s${NC}\n" \
         "" "command" "status" "current" "latest" "$path_width" "path"
@@ -408,10 +455,12 @@ render_tui() {
     done
 
     echo
-    if has_actionable_rows; then
-        printf "${DIM}Installable rows are missing tools, newer releases, or known latest versions with unknown local versions.${NC}\n"
+    if [ "$WELCOME_CHECK_UPDATES" -eq 0 ]; then
+        printf "${DIM}Fast local status. Use /updates to check latest versions; /nvm for Node versions.${NC}\n"
+    elif has_actionable_rows; then
+        printf "${DIM}Update check view. q returns to local status; /quit exits welcome.${NC}\n"
     else
-        printf "${GREEN}All managed commands appear current.${NC}\n"
+        printf "${GREEN}Update check view. All managed commands appear current. q returns to local status.${NC}\n"
     fi
 
     if [ -n "$message" ]; then
@@ -462,7 +511,8 @@ install_selected_from_tui() {
     pause_for_tui
     tput clear 2>/dev/null || true
     printf '%sRefreshing status...%s\n' "$DIM" "$NC"
-    load_rows
+    WELCOME_CHECK_UPDATES=0
+    load_rows 0
 }
 
 install_all_from_tui() {
@@ -483,11 +533,93 @@ install_all_from_tui() {
     pause_for_tui
     tput clear 2>/dev/null || true
     printf '%sRefreshing status...%s\n' "$DIM" "$NC"
-    load_rows
+    WELCOME_CHECK_UPDATES=0
+    load_rows 0
+}
+
+show_slash_help() {
+    tput clear 2>/dev/null || true
+    printf "${BOLD}${CYAN}Slash commands${NC}\n\n"
+    printf '  /nvm, /node       open Node version manager\n'
+    printf '  /updates, /check  fetch latest versions for top-level tools\n'
+    printf '  /local            return to fast local-only status\n'
+    printf '  /install          install or update selected actionable row\n'
+    printf '  /all              install or update all actionable rows\n'
+    printf '  /help             show this help\n'
+    printf '  /quit             quit welcome\n'
+    pause_for_tui
+}
+
+prompt_slash_command() {
+    local command
+
+    SLASH_COMMAND=""
+    printf '\n/%s' ''
+    if ! IFS= read -r command; then
+        printf '\n'
+        return 1
+    fi
+
+    command="${command#/}"
+    command="${command%%[[:space:]]*}"
+    command="${command,,}"
+
+    [ -n "$command" ] || command="help"
+    SLASH_COMMAND="$command"
+}
+
+execute_slash_command() {
+    local command="$1" selected="$2"
+
+    case "$command" in
+        nvm|node)
+            open_nvm_tui || true
+            SLASH_MESSAGE="${GREEN}Status refreshed.${NC}"
+            ;;
+        updates|check)
+            tput clear 2>/dev/null || true
+            printf '%sChecking latest versions...%s\n' "$DIM" "$NC"
+            WELCOME_CHECK_UPDATES=1
+            load_rows 1
+            SLASH_MESSAGE="${GREEN}Latest versions loaded.${NC}"
+            ;;
+        local)
+            WELCOME_CHECK_UPDATES=0
+            load_rows 0
+            SLASH_MESSAGE="${GREEN}Using local-only status.${NC}"
+            ;;
+        install|update)
+            if row_is_actionable "$selected"; then
+                install_selected_from_tui "$selected"
+                SLASH_MESSAGE="${GREEN}Status refreshed.${NC}"
+            else
+                SLASH_MESSAGE="${YELLOW}${COMMANDS[$selected]} is not actionable. Run /updates to check remote versions.${NC}"
+            fi
+            ;;
+        all)
+            if has_actionable_rows; then
+                install_all_from_tui
+                SLASH_MESSAGE="${GREEN}Status refreshed.${NC}"
+            else
+                SLASH_MESSAGE="${GREEN}Nothing actionable. Run /updates to check remote versions.${NC}"
+            fi
+            ;;
+        help|h|\?)
+            show_slash_help
+            SLASH_MESSAGE="${DIM}Use /nvm for Node versions or /updates for remote checks.${NC}"
+            ;;
+        q|quit|exit)
+            WELCOME_TUI_QUIT=1
+            ;;
+        *)
+            SLASH_MESSAGE="${YELLOW}Unknown command: /${command}. Try /help.${NC}"
+            ;;
+    esac
 }
 
 run_tui() {
     local selected key message row_count
+    local command
 
     [ "${#COMMANDS[@]}" -gt 0 ] || return 0
 
@@ -506,6 +638,7 @@ run_tui() {
         fi
 
         message=""
+        SLASH_MESSAGE=""
         case "$key" in
             up|k|K)
                 selected=$(((selected + row_count - 1) % row_count))
@@ -522,32 +655,61 @@ run_tui() {
                     message="${YELLOW}${COMMANDS[$selected]} has no install action right now.${NC}"
                 fi
                 ;;
+            u|U)
+                if row_is_actionable "$selected"; then
+                    install_selected_from_tui "$selected"
+                    selected=$(first_actionable_row)
+                    message="${GREEN}Status refreshed.${NC}"
+                else
+                    message="${YELLOW}${COMMANDS[$selected]} has no update action right now. Run /updates first.${NC}"
+                fi
+                ;;
             a|A)
                 if has_actionable_rows; then
                     install_all_from_tui
                     selected=$(first_actionable_row)
                     message="${GREEN}Status refreshed.${NC}"
                 else
-                    message="${GREEN}Nothing to install.${NC}"
+                    message="${GREEN}Nothing actionable. Run /updates to check remote versions.${NC}"
                 fi
+                ;;
+            /)
+                prompt_slash_command || true
+                command="$SLASH_COMMAND"
+                execute_slash_command "$command" "$selected"
+                if [ "${WELCOME_TUI_QUIT:-0}" -eq 1 ]; then
+                    render_tui "$selected" "${DIM}Skipped installs.${NC}"
+                    printf '\n'
+                    return 0
+                fi
+                selected=$(first_actionable_row)
+                message="$SLASH_MESSAGE"
                 ;;
             r|R)
                 tput clear 2>/dev/null || true
-                printf '%sRefreshing status...%s\n' "$DIM" "$NC"
-                load_rows
+                printf '%sRefreshing local status...%s\n' "$DIM" "$NC"
+                WELCOME_CHECK_UPDATES=0
+                load_rows 0
                 selected=$(first_actionable_row)
-                message="${GREEN}Status refreshed.${NC}"
+                message="${GREEN}Local status refreshed.${NC}"
                 ;;
             q|Q|escape)
-                render_tui "$selected" "${DIM}Skipped installs.${NC}"
-                printf '\n'
-                return 0
+                if [ "$WELCOME_CHECK_UPDATES" -eq 1 ]; then
+                    WELCOME_CHECK_UPDATES=0
+                    load_rows 0
+                    selected=$(first_actionable_row)
+                    message="${DIM}Back to local welcome.${NC}"
+                else
+                    render_tui "$selected" "${DIM}Skipped installs.${NC}"
+                    printf '\n'
+                    return 0
+                fi
                 ;;
         esac
     done
 }
 
-load_rows
+load_rows 0
 if supports_tui; then
     run_tui
 else
