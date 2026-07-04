@@ -14,7 +14,7 @@ case $- in
     *i*)
         if [ -z "$TMUX" ] && [ -n "$BASH_VERSION" ] && [ -t 0 ]; then
             printf 'Show welcome message? [Y/n] '
-            if IFS= read -r -t 3 show_welcome; then
+            if IFS= read -r -t 1 show_welcome; then
                 case "$show_welcome" in
                     ''|[Yy]|[Yy][Ee][Ss])
                         . "$HOME/dotfiles/welcome.sh"
