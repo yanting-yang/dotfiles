@@ -36,8 +36,42 @@ test('renders the welcome status rows', async () => {
     }));
 
     await new Promise(resolve => setTimeout(resolve, 20));
-    assert.match(lastFrame(), /Welcome/);
+    assert.match(lastFrame(), /Welcome back/);
     assert.match(lastFrame(), /gh/);
     assert.match(lastFrame(), /installed/);
+    assert.match(lastFrame(), /type \/ for commands/);
+    unmount();
+});
+
+test('shows slash command menu with descriptions after typing slash', async () => {
+    const tools = {
+        kind: 'tools',
+        includeUpdates: false,
+        rows: []
+    };
+
+    const loaders = {
+        loadTools: async () => tools,
+        loadNvm: async () => ({kind: 'nvm', ok: true, current: 'none', remoteLoaded: false, rows: []})
+    };
+
+    const {lastFrame, stdin, unmount} = render(h(App, {
+        loaders,
+        resultFile: '',
+        actionFile: '/tmp/unused-action'
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('/');
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    assert.match(lastFrame(), /\/nvm/);
+    assert.match(lastFrame(), /\/updates/);
+    assert.match(lastFrame(), /Open Node versions/);
+    assert.match(lastFrame(), /Check latest tool versions/);
+    assert.doesNotMatch(lastFrame(), /\/node/);
+    assert.doesNotMatch(lastFrame(), /\/tools/);
+    assert.doesNotMatch(lastFrame(), /\/local/);
+    assert.doesNotMatch(lastFrame(), /\/all/);
     unmount();
 });

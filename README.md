@@ -30,7 +30,9 @@ WELCOME_NODE_VERSION=22 ./bootstrap.sh --yes
 ## Welcome TUI
 
 Interactive login shells prompt before opening `welcome.sh`. The welcome UI is an
-Ink/React terminal app with local-first status checks.
+Ink/React terminal app with local-first status checks. It opens in the terminal
+alternate screen with a Claude Code-style layout: a bordered welcome/status panel at
+the top, working content in the middle, and a fixed input bar at the bottom.
 
 Run it manually:
 
@@ -42,15 +44,20 @@ Useful controls:
 
 - `j/k` or arrows: move selection
 - `Enter`: run the selected action
-- `/updates`: check remote versions for managed tools
-- `/local`: return to fast local-only tool status
-- `/nvm` or `/node`: open Node versions
+- `/`: open the bottom command menu with command descriptions
+- `/nvm`: open Node versions
+- `/updates` or `/check`: check remote versions for managed tools
+- `/install` or `/update`: install or update the selected actionable tool
+- `/help`: show slash command help in the transcript
 - `r`: refresh local tool status, or load remote Node versions inside NVM
-- `/all`: run all actionable tool installers
-- `/quit` or `q`: exit
+- `/quit`, `/exit`, or `q`: exit
 
 NVM actions are applied through the `welcome.sh` Bash bridge so `nvm use` affects the
 current shell.
+
+The intentionally supported slash commands are `/nvm`, `/updates`, `/check`,
+`/install`, `/update`, `/help`, `/quit`, and `/exit`. Removed aliases such as
+`/node`, `/tools`, `/local`, and `/all` should remain unavailable.
 
 ## Layout
 
@@ -58,7 +65,7 @@ current shell.
 - `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.ssh/config`: managed configuration.
 - `scripts/lib/`: shared Bash helpers for installers, status checks, and terminal utilities.
 - `scripts/install/`: explicit installers for managed tools.
-- `scripts/tui/welcome/`: Ink welcome app, JSON status exporter, and tests.
+- `scripts/tui/welcome/`: Ink welcome app, slash command metadata, JSON status exporter, and tests.
 - `scripts/tui/nvm.sh`: legacy/sourceable Bash NVM TUI helper used by the exporter.
 
 ## Development

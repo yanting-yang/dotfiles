@@ -3,24 +3,18 @@ import {Box, Text, useApp, useInput, useStdout} from 'ink';
 import {
     HELP_LINES,
     actionForNvmRow,
-    allToolsAction,
     firstActionableTool,
     firstCurrentNvm,
     moveSelection,
     nvmAction,
     resolveSlashCommand,
+    SLASH_COMMANDS,
     toolAction,
     visibleWindowStart
 } from './state.mjs';
 import {loadNvm, loadTools, readResultMessage, writeAction} from './io.mjs';
 
 const h = React.createElement;
-
-function nowTitle() {
-    const host = process.env.HOSTNAME ?? 'localhost';
-    const user = process.env.USER ?? 'user';
-    return `${user}@${host}`;
-}
 
 function statusColor(status) {
     switch (status) {
@@ -67,7 +61,59 @@ function Message({entry}) {
     );
 }
 
-function ToolRows({rows, selected, width, visibleRows}) {
+function statusCounts(rows) {
+    return rows.reduce((counts, row) => {
+        counts[row.status] = (counts[row.status] ?? 0) + 1;
+        return counts;
+    }, {});
+}
+
+function WelcomePanel({view, width, height, rows, includeUpdates, nvmCurrent, nvmRemote}) {
+    const username = process.env.USER ?? 'friend';
+    const cwd = process.cwd().replace(process.env.HOME ?? '', '~');
+    const leftWidth = Math.max(28, Math.min(48, Math.floor(width * 0.28)));
+    const counts = statusCounts(rows);
+    const summary = view === 'nvm'
+        ? `${nvmRemote ? 'remote loaded' : 'local only'}`
+        : includeUpdates ? 'remote checked' : 'local only';
+
+    return h(Box, {
+        borderStyle: 'single',
+        borderColor: 'red',
+        height,
+        width,
+        flexShrink: 0
+    },
+        h(Box, {width: leftWidth, flexDirection: 'column', alignItems: 'center', paddingX: 1},
+            h(Text, {bold: true}, `Welcome back ${username}!`),
+            h(Text, {color: 'red'}, '   .----.   '),
+            h(Text, {color: 'red'}, '  /|    |\\  '),
+            h(Text, {color: 'red'}, '  \\|____|/  '),
+            h(Text, {color: 'gray'}, view === 'nvm'
+                ? `Node ${nvmCurrent}`
+                : `Tools ${rows.length}  updates ${counts.update ?? 0}  missing ${counts.missing ?? 0}`
+            ),
+            h(Text, {color: 'gray'}, truncate(cwd, Math.max(10, leftWidth - 4)))
+        ),
+        h(Box, {width: 1, flexDirection: 'column', flexShrink: 0},
+            ...Array.from({length: Math.max(1, height - 2)}, (_, index) => h(Text, {key: index, color: 'red'}, '│'))
+        ),
+        h(Box, {flexGrow: 1, flexDirection: 'column', paddingX: 1},
+            h(Text, {bold: true, color: 'red'}, 'Tips for getting started'),
+            h(Text, null, 'Type / to open the command menu'),
+            h(Text, null, view === 'nvm' ? 'Press r to load remote Node versions' : 'Run /updates before installing newer tools'),
+            h(Text, {color: 'gray'}, 'Enter runs the selected row; q backs out or exits'),
+            h(Text, {color: 'red'}, '─'.repeat(Math.max(1, width - leftWidth - 8))),
+            h(Text, {bold: true, color: 'red'}, 'Status'),
+            h(Text, null, view === 'nvm'
+                ? `Node screen · ${summary}`
+                : `Managed tools · ${summary}`
+            )
+        )
+    );
+}
+
+function ToolRows({rows, selected, width, visibleRows, showRange = true}) {
     const pathWidth = Math.max(18, width - 52);
     const start = visibleWindowStart(selected, rows.length, visibleRows);
     const end = Math.min(start + visibleRows, rows.length);
@@ -89,13 +135,13 @@ function ToolRows({rows, selected, width, visibleRows}) {
                 h(Text, {inverse: isSelected, color: row.path === 'not installed' ? 'red' : undefined}, truncate(row.path, pathWidth))
             );
         }),
-        rows.length > visibleRows
+        showRange && rows.length > visibleRows
             ? h(Text, {color: 'gray'}, `showing ${start + 1}-${end} of ${rows.length}`)
             : null
     );
 }
 
-function NvmRows({rows, selected, width, visibleRows}) {
+function NvmRows({rows, selected, width, visibleRows, showRange = true}) {
     const pathWidth = Math.max(12, width - 44);
     const start = visibleWindowStart(selected, rows.length, visibleRows);
     const end = Math.min(start + visibleRows, rows.length);
@@ -119,7 +165,7 @@ function NvmRows({rows, selected, width, visibleRows}) {
                 h(Text, {inverse: isSelected}, truncate(row.path, pathWidth))
             );
         }),
-        rows.length > visibleRows
+        showRange && rows.length > visibleRows
             ? h(Text, {color: 'gray'}, `showing ${start + 1}-${end} of ${rows.length}`)
             : null
     );
@@ -137,14 +183,55 @@ function Prompt({mode, text, view}) {
     }
 
     return h(Text, {color: 'gray'}, view === 'nvm'
-        ? 'j/k move  Enter use/install  i install  d uninstall  r remote  / command  q tools'
+        ? 'j/k move  Enter use/install  i install  d uninstall  r remote  / command  q back'
         : 'j/k move  Enter install/update  / command  r local refresh  q quit'
+    );
+}
+
+function CommandMenu({filter, maxRows}) {
+    const normalized = filter.trim().toLowerCase();
+    const commands = SLASH_COMMANDS.filter(command => {
+        if (!normalized) {
+            return true;
+        }
+
+        return command.name.slice(1).startsWith(normalized)
+            || command.description.toLowerCase().includes(normalized);
+    });
+    const shown = commands.slice(0, maxRows);
+
+    if (shown.length === 0) {
+        return h(Box, {flexDirection: 'column', flexShrink: 0},
+            h(Text, {color: 'gray'}, 'No matching slash commands')
+        );
+    }
+
+    return h(Box, {flexDirection: 'column', flexShrink: 0},
+        ...shown.map((command, index) => h(Box, {key: command.name},
+            h(Text, {color: index === 0 ? 'cyan' : 'gray'}, command.name.padEnd(12)),
+            h(Text, {color: index === 0 ? 'white' : 'gray'}, command.description)
+        ))
+    );
+}
+
+function InputBar({mode, text, view}) {
+    return h(Box, {
+        borderStyle: 'single',
+        borderColor: 'gray',
+        paddingX: 1,
+        height: 3,
+        flexShrink: 0
+    },
+        h(Text, {bold: true, color: mode === 'none' ? 'gray' : 'cyan'}, '› '),
+        mode === 'none'
+            ? h(Text, {color: 'gray'}, 'type / for commands')
+            : h(Prompt, {mode, text, view})
     );
 }
 
 function useInitialMessages(resultFile) {
     const [messages, setMessages] = useState([
-        {role: 'welcome', tone: 'info', text: 'Local status loaded. Use /updates when you want remote version checks.'}
+        {role: 'welcome', tone: 'info', text: 'Local status loaded. Remote checks stay behind explicit commands.'}
     ]);
 
     useEffect(() => {
@@ -271,14 +358,6 @@ export function App({
         requestAction(toolAction(selectedTool, includeUpdates));
     }, [appendMessage, includeUpdates, requestAction, selectedTool]);
 
-    const submitAllInstall = useCallback(() => {
-        if (!toolRows.some(row => row.actionable)) {
-            appendMessage('Nothing actionable. Run /updates to check remote versions.');
-            return;
-        }
-        requestAction(allToolsAction(includeUpdates));
-    }, [appendMessage, includeUpdates, requestAction, toolRows]);
-
     const handleSlash = useCallback(commandText => {
         const result = resolveSlashCommand(commandText, view);
         appendMessage(`/${commandText.trim().replace(/^\/+/, '') || 'help'}`, 'info', 'you');
@@ -292,15 +371,8 @@ export function App({
                 setView('tools');
                 refreshTools(true, 'Latest tool versions loaded.');
                 break;
-            case 'local':
-                setView('tools');
-                refreshTools(false, 'Using fast local status.');
-                break;
             case 'install':
                 submitToolInstall();
-                break;
-            case 'install_all':
-                submitAllInstall();
                 break;
             case 'help':
                 for (const line of HELP_LINES) {
@@ -317,7 +389,7 @@ export function App({
                 appendMessage('Command did nothing.', 'warn');
                 break;
         }
-    }, [appendMessage, exit, refreshTools, submitAllInstall, submitToolInstall, view]);
+    }, [appendMessage, exit, refreshTools, submitToolInstall, view]);
 
     const handleInputSubmit = useCallback(() => {
         if (inputMode === 'slash') {
@@ -436,13 +508,6 @@ export function App({
             return;
         }
 
-        if (input === 'a' || input === 'A') {
-            if (view === 'tools') {
-                submitAllInstall();
-            }
-            return;
-        }
-
         if (input === 'q' || input === 'Q' || key.escape) {
             if (view === 'nvm') {
                 setView('tools');
@@ -455,37 +520,50 @@ export function App({
         }
     });
 
-    const transcriptLimit = Math.max(2, Math.min(8, Math.floor(height / 4)));
-    const transcript = useMemo(() => messages.slice(-transcriptLimit), [messages, transcriptLimit]);
+    const headerHeight = height >= 24 ? 10 : Math.max(7, Math.floor(height * 0.35));
+    const commandMenuVisible = inputMode === 'slash';
+    const commandMenuMaxRows = commandMenuVisible
+        ? Math.max(1, Math.min(SLASH_COMMANDS.length, height - headerHeight - 6))
+        : 0;
+    const commandMenuHeight = commandMenuVisible ? commandMenuMaxRows : 0;
+    const mainHeight = Math.max(3, height - headerHeight - commandMenuHeight - 3);
+    const transcriptLimit = commandMenuVisible
+        ? 0
+        : Math.max(1, Math.min(6, Math.floor(mainHeight / 3)));
+    const transcript = useMemo(
+        () => transcriptLimit > 0 ? messages.slice(-transcriptLimit) : [],
+        [messages, transcriptLimit]
+    );
     const extraStatusLines = (nvmError && view === 'nvm' ? 1 : 0) + (busy ? 1 : 0);
-    const visibleRows = Math.max(3, height - transcript.length - extraStatusLines - 10);
+    const visibleRows = Math.max(1, mainHeight - transcript.length - extraStatusLines - 2);
 
     return h(Box, {flexDirection: 'column', height, width},
-        h(Box, {justifyContent: 'space-between'},
-            h(Text, {bold: true, color: 'cyan'}, view === 'nvm' ? 'Node versions' : 'Welcome'),
-            h(Text, {color: 'gray'}, nowTitle())
-        ),
-        h(Text, {color: 'gray'}, view === 'nvm'
-            ? `current: ${nvmCurrent}${nvmRemote ? '  remote loaded' : '  local only'}`
-            : includeUpdates ? 'tool status: remote checked' : 'tool status: local only'
-        ),
-        h(Box, {marginTop: 1, flexDirection: 'column'},
+        h(WelcomePanel, {
+            view,
+            width,
+            height: headerHeight,
+            rows: view === 'nvm' ? nvmRows : toolRows,
+            includeUpdates,
+            nvmCurrent,
+            nvmRemote
+        }),
+        h(Box, {height: mainHeight, flexDirection: 'column', flexGrow: 1},
             view === 'nvm'
-                ? h(NvmRows, {rows: nvmRows, selected: nvmSelected, width, visibleRows})
-                : h(ToolRows, {rows: toolRows, selected: toolSelected, width, visibleRows})
+                ? h(NvmRows, {rows: nvmRows, selected: nvmSelected, width, visibleRows, showRange: !commandMenuVisible})
+                : h(ToolRows, {rows: toolRows, selected: toolSelected, width, visibleRows, showRange: !commandMenuVisible}),
+            nvmError && view === 'nvm'
+                ? h(Text, {color: 'yellow'}, nvmError)
+                : null,
+            busy
+                ? h(Text, {color: 'gray'}, busy)
+                : null,
+            h(Box, {marginTop: 1, flexDirection: 'column'},
+                ...transcript.map((entry, index) => h(Message, {key: `${entry.role}-${index}-${entry.text}`, entry}))
+            )
         ),
-        nvmError && view === 'nvm'
-            ? h(Text, {color: 'yellow'}, nvmError)
+        inputMode === 'slash'
+            ? h(CommandMenu, {filter: inputText, maxRows: commandMenuMaxRows})
             : null,
-        busy
-            ? h(Text, {color: 'gray'}, busy)
-            : null,
-        h(Box, {marginTop: 1, flexDirection: 'column'},
-            ...transcript.map((entry, index) => h(Message, {key: `${entry.role}-${index}-${entry.text}`, entry}))
-        ),
-        h(Box, {marginTop: 1},
-            h(Text, {bold: true, color: inputMode === 'none' ? 'gray' : 'cyan'}, '> '),
-            h(Prompt, {mode: inputMode, text: inputText, view})
-        )
+        h(InputBar, {mode: inputMode, text: inputText, view})
     );
 }

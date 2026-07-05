@@ -118,24 +118,6 @@ welcome_run_tool_installer() {
     return 1
 }
 
-welcome_run_all_installers() {
-    local include_updates="${1:-0}" i ran=0 rc=0
-
-    load_rows "$include_updates"
-    for i in "${!COMMANDS[@]}"; do
-        if row_is_actionable "$i"; then
-            welcome_run_installer_by_index "$i" || rc=$?
-            ran=1
-        fi
-    done
-
-    if [ "$ran" -eq 0 ]; then
-        printf 'Nothing to install.\n'
-    fi
-
-    return "$rc"
-}
-
 welcome_load_nvm() {
     local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
 
@@ -215,12 +197,6 @@ welcome_execute_action_file() {
             welcome_record_result "$result_file" "Tool action: $command_name" "$rc" "$output"
             return 0
             ;;
-        install_all)
-            output=$(welcome_run_all_installers "$include_updates" 2>&1)
-            rc=$?
-            welcome_record_result "$result_file" "Tool action: all" "$rc" "$output"
-            return 0
-            ;;
         nvm_use|nvm_install_use|nvm_uninstall)
             version=$(welcome_action_value VERSION "$action_file")
             output=$(welcome_run_nvm_action "$action" "$version" 2>&1)
@@ -272,7 +248,7 @@ welcome_main() {
         welcome_execute_action_file "$action_file" "$result_file" || break
 
         case "$action" in
-            install_tool|install_all)
+            install_tool)
                 view="tools"
                 include_updates=0
                 nvm_remote=0

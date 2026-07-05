@@ -32,9 +32,11 @@ Use Bash for shell tools. Prefer `#!/usr/bin/env bash` for executable scripts an
 
 Use ESM `.mjs` for the Ink app under `scripts/tui/welcome/`. Keep React components small, use plain `React.createElement` unless the repo adds a transpile step, and keep mutating actions behind `welcome.sh` action files so `nvm use` can affect the parent shell.
 
+The first-level welcome UI should stay close to Claude Code's terminal shape: alternate full-screen buffer, bordered top welcome/status panel, middle content area, command menu above a fixed bottom input bar. Typing `/` must show all available slash commands with descriptions. Keep supported slash commands limited to `/nvm`, `/updates`, `/check`, `/install`, `/update`, `/help`, `/quit`, and `/exit`; do not reintroduce `/node`, `/tools`, `/local`, or `/all` aliases.
+
 ## Testing Guidelines
 
-Run `npm test`, `bash -O globstar -n .profile welcome.sh bootstrap.sh scripts/**/*.sh`, and `git diff --check` for every change. For TUI changes, test interactively with harmless stubs where possible, for example overriding `curl`, installers, or `nvm` in a subshell to avoid real downloads, installs, or version switches. Verify both TTY and non-TTY paths when changing display logic. For bootstrap changes, smoke-test `--dry-run` and `--yes` with a temporary `HOME`.
+Run `npm test`, `bash -O globstar -n .profile welcome.sh bootstrap.sh scripts/**/*.sh`, and `git diff --check` for every change. For TUI changes, test interactively with harmless stubs where possible, for example overriding `curl`, installers, or `nvm` in a subshell to avoid real downloads, installs, or version switches. Verify both TTY and non-TTY paths when changing display logic, and verify the `/` command menu renders at the bottom with descriptions. For bootstrap changes, smoke-test `--dry-run` and `--yes` with a temporary `HOME`.
 
 ## Commit & Pull Request Guidelines
 

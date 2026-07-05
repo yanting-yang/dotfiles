@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     actionForNvmRow,
-    allToolsAction,
     firstCurrentNvm,
     firstActionableTool,
     moveSelection,
@@ -38,12 +37,18 @@ test('calculates selected row viewport start', () => {
 
 test('normalizes and resolves slash commands', () => {
     assert.equal(normalizeSlashCommand('/updates now'), 'updates');
-    assert.deepEqual(resolveSlashCommand('/node', 'tools'), {
+    assert.deepEqual(resolveSlashCommand('/nvm', 'tools'), {
         type: 'view',
         view: 'nvm',
         message: 'Opening Node versions.'
     });
-    assert.equal(resolveSlashCommand('/all', 'tools').type, 'install_all');
+    assert.equal(resolveSlashCommand('/node', 'tools').type, 'message');
+    assert.equal(resolveSlashCommand('/tools', 'nvm').type, 'message');
+    assert.equal(resolveSlashCommand('/local', 'tools').type, 'message');
+    assert.equal(resolveSlashCommand('/all', 'tools').type, 'message');
+    assert.equal(resolveSlashCommand('/q', 'tools').type, 'message');
+    assert.equal(resolveSlashCommand('/h', 'tools').type, 'message');
+    assert.equal(resolveSlashCommand('/?', 'tools').type, 'message');
     assert.equal(resolveSlashCommand('/wat', 'tools').type, 'message');
 });
 
@@ -52,11 +57,6 @@ test('builds action file payloads', () => {
         ACTION: 'install_tool',
         COMMAND: 'gh',
         INCLUDE_UPDATES: '1',
-        VIEW: 'tools'
-    });
-    assert.deepEqual(allToolsAction(false), {
-        ACTION: 'install_all',
-        INCLUDE_UPDATES: '0',
         VIEW: 'tools'
     });
     assert.deepEqual(actionForNvmRow({version: 'v24.0.0', status: 'available'}, true), {

@@ -1,12 +1,47 @@
-export const HELP_LINES = [
-    '/nvm or /node opens Node versions.',
-    '/tools returns to managed tools.',
-    '/updates checks latest tool versions.',
-    '/local returns to fast local status.',
-    '/install runs the selected actionable row.',
-    '/all runs every actionable row.',
-    '/quit exits welcome.'
+export const SLASH_COMMANDS = [
+    {
+        name: '/nvm',
+        description: 'Open Node versions',
+        result: {type: 'view', view: 'nvm', message: 'Opening Node versions.'}
+    },
+    {
+        name: '/updates',
+        description: 'Check latest tool versions',
+        result: {type: 'updates'}
+    },
+    {
+        name: '/check',
+        description: 'Check latest tool versions',
+        result: {type: 'updates'}
+    },
+    {
+        name: '/install',
+        description: 'Install or update the selected actionable tool',
+        result: {type: 'install'}
+    },
+    {
+        name: '/update',
+        description: 'Install or update the selected actionable tool',
+        result: {type: 'install'}
+    },
+    {
+        name: '/help',
+        description: 'Show slash command help',
+        result: {type: 'help'}
+    },
+    {
+        name: '/quit',
+        description: 'Exit welcome',
+        result: {type: 'quit'}
+    },
+    {
+        name: '/exit',
+        description: 'Exit welcome',
+        result: {type: 'quit'}
+    }
 ];
+
+export const HELP_LINES = SLASH_COMMANDS.map(command => `${command.name}  ${command.description}`);
 
 export function clampSelection(selected, count) {
     if (count <= 0) {
@@ -56,52 +91,28 @@ export function normalizeSlashCommand(input) {
 
 export function resolveSlashCommand(input, view) {
     const command = normalizeSlashCommand(input);
+    const slashCommand = `/${command}`;
+    const match = SLASH_COMMANDS.find(candidate => candidate.name === slashCommand);
 
-    switch (command) {
-        case 'nvm':
-        case 'node':
-            return {type: 'view', view: 'nvm', message: 'Opening Node versions.'};
-        case 'tools':
-            return {type: 'view', view: 'tools', message: 'Back to managed tools.'};
-        case 'updates':
-        case 'check':
-            return {type: 'updates'};
-        case 'local':
-            return {type: 'local'};
-        case 'install':
-        case 'update':
-            return {type: 'install'};
-        case 'all':
-            return {type: 'install_all'};
-        case 'help':
-        case 'h':
-        case '?':
+    if (match) {
+        if (match.result.type === 'help') {
             return {type: 'help', lines: HELP_LINES};
-        case 'q':
-        case 'quit':
-        case 'exit':
-            return {type: 'quit'};
-        default:
-            return {
-                type: 'message',
-                tone: 'warn',
-                message: `Unknown command: /${command}. Try /help.`
-            };
+        }
+
+        return match.result;
     }
+
+    return {
+        type: 'message',
+        tone: 'warn',
+        message: `Unknown command: /${command}. Try /help.`
+    };
 }
 
 export function toolAction(row, includeUpdates) {
     return {
         ACTION: 'install_tool',
         COMMAND: row.command,
-        INCLUDE_UPDATES: includeUpdates ? '1' : '0',
-        VIEW: 'tools'
-    };
-}
-
-export function allToolsAction(includeUpdates) {
-    return {
-        ACTION: 'install_all',
         INCLUDE_UPDATES: includeUpdates ? '1' : '0',
         VIEW: 'tools'
     };
