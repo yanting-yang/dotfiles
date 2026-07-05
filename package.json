@@ -1,0 +1,20 @@
+{
+  "name": "dotfiles-welcome",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "welcome": "node scripts/tui/welcome/cli.mjs",
+    "test": "node --test scripts/tui/welcome/*.test.mjs && bash scripts/tui/welcome/bridge.test.sh"
+  },
+  "dependencies": {
+    "ink": "7.1.0",
+    "react": "19.2.7"
+  },
+  "devDependencies": {
+    "ink-testing-library": "4.0.0"
+  }
+}

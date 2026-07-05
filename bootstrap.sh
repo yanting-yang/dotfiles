@@ -5,6 +5,7 @@ DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DRY_RUN=0
 YES=0
 BACKUP_DIR=""
+WELCOME_NODE_VERSION="${WELCOME_NODE_VERSION:-24}"
 
 SOURCES=(
     "$DOTFILES_DIR/.profile"
@@ -27,6 +28,9 @@ usage() {
     printf '\n'
     printf '  --dry-run  show planned links without changing files\n'
     printf '  --yes      apply without prompting; required for non-interactive use\n'
+    printf '\n'
+    printf 'Environment:\n'
+    printf '  WELCOME_NODE_VERSION  Node major/version to install with nvm when needed [%s]\n' "$WELCOME_NODE_VERSION"
 }
 
 die() {
@@ -101,16 +105,58 @@ validate_sources() {
     for source in "${SOURCES[@]}"; do
         [ -e "$source" ] || die "missing source: $source"
     done
+
+    [ -f "$DOTFILES_DIR/package.json" ] || die "missing source: $DOTFILES_DIR/package.json"
+    [ -f "$DOTFILES_DIR/package-lock.json" ] || die "missing source: $DOTFILES_DIR/package-lock.json"
+    [ -f "$DOTFILES_DIR/scripts/tui/welcome/cli.mjs" ] || die "missing welcome app"
+}
+
+node_satisfies_welcome() {
+    local major
+
+    command -v node >/dev/null 2>&1 || return 1
+    major=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')
+    [ "$major" -ge 22 ]
+}
+
+welcome_deps_installed() {
+    [ -d "$DOTFILES_DIR/node_modules/ink" ] \
+        && [ -d "$DOTFILES_DIR/node_modules/react" ]
+}
+
+welcome_dependency_status() {
+    if node_satisfies_welcome && command -v npm >/dev/null 2>&1 && welcome_deps_installed; then
+        printf 'ok'
+    elif node_satisfies_welcome && command -v npm >/dev/null 2>&1; then
+        printf 'npm-ci'
+    else
+        printf 'node-and-npm-ci'
+    fi
 }
 
 print_plan() {
     local i status
+    local welcome_status
 
     printf 'Dotfile links:\n'
     for i in "${!SOURCES[@]}"; do
         status=$(target_status "${SOURCES[$i]}" "${TARGETS[$i]}")
         printf '  %-7s %s -> %s\n' "$status" "$(display_path "${TARGETS[$i]}")" "${SOURCES[$i]}"
     done
+
+    welcome_status=$(welcome_dependency_status)
+    printf '\nWelcome TUI:\n'
+    case "$welcome_status" in
+        ok)
+            printf '  ok      Node %s with Ink dependencies installed\n' "$(node --version)"
+            ;;
+        npm-ci)
+            printf '  install npm ci in %s\n' "$DOTFILES_DIR"
+            ;;
+        node-and-npm-ci)
+            printf '  install nvm/Node %s if needed, then npm ci in %s\n' "$WELCOME_NODE_VERSION" "$DOTFILES_DIR"
+            ;;
+    esac
 }
 
 confirm_apply() {
@@ -182,6 +228,43 @@ apply_links() {
     done
 }
 
+load_or_install_welcome_node() {
+    local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
+    local nvm_installer="$DOTFILES_DIR/scripts/install/nvm.sh"
+
+    if node_satisfies_welcome && command -v npm >/dev/null 2>&1; then
+        return 0
+    fi
+
+    printf '\nPreparing Node %s for welcome TUI...\n' "$WELCOME_NODE_VERSION"
+    [ -f "$nvm_installer" ] || die "missing nvm installer: $nvm_installer"
+    bash "$nvm_installer"
+
+    [ -s "$nvm_dir/nvm.sh" ] || die "nvm install completed, but $nvm_dir/nvm.sh is missing"
+    # shellcheck source=/dev/null
+    source "$nvm_dir/nvm.sh" --no-use
+    command -v nvm >/dev/null 2>&1 || die "nvm install completed, but nvm is unavailable"
+
+    nvm install "$WELCOME_NODE_VERSION"
+    nvm alias default "$WELCOME_NODE_VERSION" >/dev/null
+    nvm use "$WELCOME_NODE_VERSION"
+
+    node_satisfies_welcome || die "Node >=22 is still unavailable after installing Node $WELCOME_NODE_VERSION"
+    command -v npm >/dev/null 2>&1 || die "npm is unavailable after installing Node $WELCOME_NODE_VERSION"
+}
+
+install_welcome_deps() {
+    if node_satisfies_welcome && command -v npm >/dev/null 2>&1 && welcome_deps_installed; then
+        printf '\nWelcome TUI dependencies already installed.\n'
+        return 0
+    fi
+
+    load_or_install_welcome_node
+
+    printf '\nInstalling welcome TUI dependencies...\n'
+    npm --prefix "$DOTFILES_DIR" ci
+}
+
 validate_sources
 print_plan
 
@@ -192,6 +275,7 @@ fi
 
 confirm_apply || exit 0
 apply_links
+install_welcome_deps
 
 if [ -n "$BACKUP_DIR" ]; then
     printf '\nBackups saved in %s\n' "$BACKUP_DIR"

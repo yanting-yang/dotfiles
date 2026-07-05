@@ -1,127 +1,83 @@
 #!/usr/bin/env bash
 
-DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-LIB_DIR="$DOTFILES_DIR/scripts/lib"
-TUI_DIR="$DOTFILES_DIR/scripts/tui"
-NVM_TUI="$TUI_DIR/nvm.sh"
-WELCOME_CHECK_UPDATES=0
+WELCOME_DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+WELCOME_APP="$WELCOME_DOTFILES_DIR/scripts/tui/welcome/cli.mjs"
+WELCOME_LIB_DIR="$WELCOME_DOTFILES_DIR/scripts/lib"
+WELCOME_NODE_MODULES="$WELCOME_DOTFILES_DIR/node_modules"
 
-# shellcheck source=scripts/lib/tui.sh
-source "$LIB_DIR/tui.sh"
 # shellcheck source=scripts/lib/code.sh
-source "$LIB_DIR/code.sh"
+source "$WELCOME_LIB_DIR/code.sh"
 # shellcheck source=scripts/lib/tool_status.sh
-source "$LIB_DIR/tool_status.sh"
+source "$WELCOME_LIB_DIR/tool_status.sh"
 
-RED="$TUI_RED"
-GREEN="$TUI_GREEN"
-YELLOW="$TUI_YELLOW"
-CYAN="$TUI_CYAN"
-BOLD="$TUI_BOLD"
-DIM="$TUI_DIM"
-REV="$TUI_REV"
-NC="$TUI_NC"
-
-print_status() {
-    local width="$1" status="$2"
-
-    case "$status" in
-        missing)
-            printf "${RED}%-*s${NC}" "$width" "$status"
-            ;;
-        update|check)
-            printf "${YELLOW}%-*s${NC}" "$width" "$status"
-            ;;
-        current)
-            printf "${GREEN}%-*s${NC}" "$width" "$status"
-            ;;
-        installed)
-            printf "${GREEN}%-*s${NC}" "$width" "$status"
-            ;;
-        *)
-            printf "%-*s" "$width" "$status"
-            ;;
-    esac
+welcome_is_sourced() {
+    [ "${#BASH_SOURCE[@]}" -gt 1 ]
 }
 
-print_table() {
-    local command_width=7 path_width=4 current_width=7 latest_width=6 status_width=6
-    local table_width hr title i
+welcome_require_runtime() {
+    local node_major
 
-    for i in "${!COMMANDS[@]}"; do
-        [ "${#COMMANDS[$i]}" -gt "$command_width" ] && command_width=${#COMMANDS[$i]}
-        [ "${#PATHS[$i]}" -gt "$path_width" ] && path_width=${#PATHS[$i]}
-        [ "${#CURRENTS[$i]}" -gt "$current_width" ] && current_width=${#CURRENTS[$i]}
-        [ "${#LATESTS[$i]}" -gt "$latest_width" ] && latest_width=${#LATESTS[$i]}
-        [ "${#STATUSES[$i]}" -gt "$status_width" ] && status_width=${#STATUSES[$i]}
-    done
-
-    table_width=$((command_width + path_width + current_width + latest_width + status_width + 8))
-    hr=$(tui_repeat_char '─' "$table_width")
-    title="$(whoami)@$(hostname -s)  $(date '+%a %b %d %Y %H:%M')"
-
-    printf "${BOLD}${CYAN}┌%s┐${NC}\n" "$hr"
-    printf "${BOLD}${CYAN}│${NC}  %-*s${BOLD}${CYAN}│${NC}\n" "$((table_width - 2))" "$title"
-    printf "${BOLD}${CYAN}└%s┘${NC}\n" "$hr"
-    echo
-
-    printf "${BOLD}%-*s  %-*s  %-*s  %-*s  %-*s${NC}\n" \
-        "$command_width" "command" \
-        "$path_width" "path" \
-        "$current_width" "current" \
-        "$latest_width" "latest" \
-        "$status_width" "status"
-    printf "%-*s  %-*s  %-*s  %-*s  %-*s\n" \
-        "$command_width" "$(tui_repeat_char '-' "$command_width")" \
-        "$path_width" "$(tui_repeat_char '-' "$path_width")" \
-        "$current_width" "$(tui_repeat_char '-' "$current_width")" \
-        "$latest_width" "$(tui_repeat_char '-' "$latest_width")" \
-        "$status_width" "$(tui_repeat_char '-' "$status_width")"
-
-    for i in "${!COMMANDS[@]}"; do
-        printf "%-*s  " "$command_width" "${COMMANDS[$i]}"
-        if [ "${PATHS[$i]}" = "not installed" ]; then
-            printf "${RED}%-*s${NC}  " "$path_width" "${PATHS[$i]}"
-        else
-            printf "%-*s  " "$path_width" "${PATHS[$i]}"
-        fi
-        printf "%-*s  " "$current_width" "${CURRENTS[$i]}"
-        if latest_is_newer "${CURRENTS[$i]}" "${LATESTS[$i]}"; then
-            printf "${YELLOW}%-*s${NC}  " "$latest_width" "${LATESTS[$i]}"
-        else
-            printf "%-*s  " "$latest_width" "${LATESTS[$i]}"
-        fi
-        print_status "$status_width" "${STATUSES[$i]}"
-        printf '\n'
-    done
-
-    printf "${BOLD}${CYAN}└%s┘${NC}\n" "$hr"
-}
-
-run_installer() {
-    local index="$1" installer="${INSTALLERS[$1]}"
-    local code_running_status rc
-
-    if [ ! -f "$installer" ]; then
-        printf "${RED}No installer found:${NC} %s\n" "$installer"
+    if ! command -v node >/dev/null 2>&1; then
+        printf 'Welcome requires Node >=22. Run npm install in %s after Node is available.\n' "$WELCOME_DOTFILES_DIR"
         return 1
     fi
 
-    if [ "${COMMANDS[$index]}" = "code" ]; then
+    node_major=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')
+    if [ "$node_major" -lt 22 ]; then
+        printf 'Welcome requires Node >=22; current node is %s.\n' "$(node --version 2>/dev/null || printf unknown)"
+        return 1
+    fi
+
+    if [ ! -d "$WELCOME_NODE_MODULES/ink" ] || [ ! -d "$WELCOME_NODE_MODULES/react" ]; then
+        printf 'Welcome dependencies are missing. Run npm install in %s.\n' "$WELCOME_DOTFILES_DIR"
+        return 1
+    fi
+
+    if [ ! -f "$WELCOME_APP" ]; then
+        printf 'Welcome app is missing: %s\n' "$WELCOME_APP"
+        return 1
+    fi
+}
+
+welcome_action_value() {
+    local key="$1" file="$2"
+
+    awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file" 2>/dev/null
+}
+
+welcome_valid_token() {
+    [[ "$1" =~ ^[A-Za-z0-9_.-]+$ ]]
+}
+
+welcome_valid_nvm_version() {
+    [[ "$1" =~ ^[A-Za-z0-9._/+*-]+$ ]]
+}
+
+welcome_run_installer_by_index() {
+    local index="$1" installer="${INSTALLERS[$1]}"
+    local code_running_status rc command_name
+
+    command_name="${COMMANDS[$index]}"
+    if [ ! -f "$installer" ]; then
+        printf 'No installer found: %s\n' "$installer"
+        return 1
+    fi
+
+    if [ "$command_name" = "code" ]; then
         if code_is_running; then
-            printf "${YELLOW}code is running; skipping update.${NC}\n"
+            printf 'code is running; skipping update.\n'
             return 0
         else
             code_running_status=$?
         fi
 
         if [ "$code_running_status" -eq 2 ]; then
-            printf "${YELLOW}Could not check whether code is running; skipping update.${NC}\n"
+            printf 'Could not check whether code is running; skipping update.\n'
             return 0
         fi
     fi
 
-    printf '\n%sInstalling latest %s...%s\n' "$BOLD" "${COMMANDS[$index]}" "$NC"
+    printf 'Installing latest %s...\n' "$command_name"
     if bash "$installer"; then
         rc=0
     else
@@ -130,318 +86,221 @@ run_installer() {
 
     if [ "$rc" -eq 0 ]; then
         hash -r 2>/dev/null || true
-        printf "${GREEN}Installed latest %s.${NC}\n" "${COMMANDS[$index]}"
+        printf 'Installed latest %s.\n' "$command_name"
     else
-        printf "${RED}Failed to install %s (exit %s).${NC}\n" "${COMMANDS[$index]}" "$rc"
+        printf 'Failed to install %s (exit %s).\n' "$command_name" "$rc"
     fi
 
     return "$rc"
 }
 
-open_nvm_tui() {
-    local rc=0
+welcome_run_tool_installer() {
+    local command_name="$1" include_updates="${2:-0}" i
 
-    tui_clear
-    if [ ! -f "$NVM_TUI" ]; then
-        printf "${RED}No nvm TUI found:${NC} %s\n" "$NVM_TUI"
-        tui_pause welcome
-        return 1
-    fi
+    welcome_valid_token "$command_name" || {
+        printf 'Invalid command name: %s\n' "$command_name"
+        return 2
+    }
 
-    # shellcheck source=/dev/null
-    source "$NVM_TUI"
-    NVM_TUI_PARENT="welcome"
-    run_nvm_tui || rc=$?
-    unset NVM_TUI_PARENT
-
-    if [ "$rc" -ne 0 ]; then
-        tui_pause welcome
-    fi
-
-    tui_clear
-    printf '%sRefreshing status...%s\n' "$DIM" "$NC"
-    WELCOME_CHECK_UPDATES=0
-    load_rows 0
-    return "$rc"
-}
-
-render_tui_row() {
-    local index="$1" selected="$2" path_width="$3"
-    local marker=' ' path status
-
-    path=$(tui_truncate "${PATHS[$index]}" "$path_width")
-    status="${STATUSES[$index]}"
-    [ "$index" -eq "$selected" ] && marker='>'
-
-    if [ "$index" -eq "$selected" ]; then
-        printf "${REV}%s %-7s %-8s %-10s %-10s %-*s${NC}\n" \
-            "$marker" \
-            "${COMMANDS[$index]}" \
-            "$status" \
-            "${CURRENTS[$index]}" \
-            "${LATESTS[$index]}" \
-            "$path_width" "$path"
-        return 0
-    fi
-
-    printf '%s %-7s ' "$marker" "${COMMANDS[$index]}"
-    print_status 8 "$status"
-    printf ' %-10s %-10s %-*s\n' \
-        "${CURRENTS[$index]}" \
-        "${LATESTS[$index]}" \
-        "$path_width" "$path"
-}
-
-render_tui() {
-    local selected="$1" message="${2:-}"
-    local cols path_width rule title quit_hint i
-
-    cols=$(tui_cols)
-    path_width=$((cols - 44))
-    [ "$path_width" -ge 24 ] || path_width=24
-    [ "$path_width" -le 100 ] || path_width=100
-    rule=$(tui_repeat_char '─' "$cols")
-    title="$(whoami)@$(hostname -s)  $(date '+%a %b %d %Y %H:%M')"
-    quit_hint="q quit"
-    [ "$WELCOME_CHECK_UPDATES" -eq 1 ] && quit_hint="q back"
-
-    tui_clear
-    printf "${BOLD}${CYAN}Welcome${NC}  %s\n" "$title"
-    printf "${DIM}%s${NC}\n" "$rule"
-    printf "${DIM}j/k move  Enter install/update  / commands  r refresh local  %s${NC}\n\n" "$quit_hint"
-
-    printf "${BOLD}%-2s %-7s %-8s %-10s %-10s %-*s${NC}\n" \
-        "" "command" "status" "current" "latest" "$path_width" "path"
-    printf "${DIM}%-2s %-7s %-8s %-10s %-10s %-*s${NC}\n" \
-        "" "-------" "------" "-------" "------" "$path_width" "$(tui_repeat_char '-' "$path_width")"
-
+    load_rows "$include_updates"
     for i in "${!COMMANDS[@]}"; do
-        render_tui_row "$i" "$selected" "$path_width"
+        if [ "${COMMANDS[$i]}" = "$command_name" ]; then
+            if row_is_actionable "$i"; then
+                welcome_run_installer_by_index "$i"
+                return $?
+            fi
+            printf '%s is not actionable right now.\n' "$command_name"
+            return 0
+        fi
     done
 
-    echo
-    if [ "$WELCOME_CHECK_UPDATES" -eq 0 ]; then
-        printf "${DIM}Fast local status. Use /updates to check latest versions; /nvm for Node versions.${NC}\n"
-    elif has_actionable_rows; then
-        printf "${DIM}Update check view. q returns to local status; /quit exits welcome.${NC}\n"
-    else
-        printf "${GREEN}Update check view. All managed commands appear current. q returns to local status.${NC}\n"
-    fi
-
-    if [ -n "$message" ]; then
-        printf '%s\n' "$message"
-    fi
+    printf 'Unknown managed command: %s\n' "$command_name"
+    return 1
 }
 
-install_selected_from_tui() {
-    local selected="$1"
+welcome_run_all_installers() {
+    local include_updates="${1:-0}" i ran=0 rc=0
 
-    tui_clear
-    run_installer "$selected" || true
-    tui_pause welcome
-    tui_clear
-    printf '%sRefreshing status...%s\n' "$DIM" "$NC"
-    WELCOME_CHECK_UPDATES=0
-    load_rows 0
-}
-
-install_all_from_tui() {
-    local i ran=0
-
-    tui_clear
+    load_rows "$include_updates"
     for i in "${!COMMANDS[@]}"; do
         if row_is_actionable "$i"; then
-            run_installer "$i" || true
+            welcome_run_installer_by_index "$i" || rc=$?
             ran=1
         fi
     done
 
     if [ "$ran" -eq 0 ]; then
-        printf "${GREEN}Nothing to install.${NC}\n"
+        printf 'Nothing to install.\n'
     fi
 
-    tui_pause welcome
-    tui_clear
-    printf '%sRefreshing status...%s\n' "$DIM" "$NC"
-    WELCOME_CHECK_UPDATES=0
-    load_rows 0
+    return "$rc"
 }
 
-show_slash_help() {
-    tui_clear
-    printf "${BOLD}${CYAN}Slash commands${NC}\n\n"
-    printf '  /nvm, /node       open Node version manager\n'
-    printf '  /updates, /check  fetch latest versions for top-level tools\n'
-    printf '  /local            return to fast local-only status\n'
-    printf '  /install          install or update selected actionable row\n'
-    printf '  /all              install or update all actionable rows\n'
-    printf '  /help             show this help\n'
-    printf '  /quit             quit welcome\n'
-    tui_pause welcome
-}
+welcome_load_nvm() {
+    local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
 
-prompt_slash_command() {
-    local command
-
-    SLASH_COMMAND=""
-    printf '\n/%s' ''
-    if ! IFS= read -r command; then
-        printf '\n'
-        return 1
+    if ! command -v nvm >/dev/null 2>&1; then
+        [ -s "$nvm_dir/nvm.sh" ] || {
+            printf 'nvm is not installed. Install it with %s/scripts/install/nvm.sh\n' "$WELCOME_DOTFILES_DIR"
+            return 1
+        }
+        # shellcheck source=/dev/null
+        source "$nvm_dir/nvm.sh" --no-use
     fi
 
-    command="${command#/}"
-    command="${command%%[[:space:]]*}"
-    command="${command,,}"
-
-    [ -n "$command" ] || command="help"
-    SLASH_COMMAND="$command"
+    command -v nvm >/dev/null 2>&1
 }
 
-execute_slash_command() {
-    local command="$1" selected="$2"
+welcome_run_nvm_action() {
+    local action="$1" version="$2"
 
-    case "$command" in
-        nvm|node)
-            open_nvm_tui || true
-            SLASH_MESSAGE="${GREEN}Status refreshed.${NC}"
+    welcome_valid_nvm_version "$version" || {
+        printf 'Invalid Node version: %s\n' "$version"
+        return 2
+    }
+
+    welcome_load_nvm || return 1
+
+    case "$action" in
+        nvm_use)
+            printf 'Using Node %s...\n' "$version"
+            nvm use "$version"
             ;;
-        updates|check)
-            tui_clear
-            printf '%sChecking latest versions...%s\n' "$DIM" "$NC"
-            WELCOME_CHECK_UPDATES=1
-            load_rows 1
-            SLASH_MESSAGE="${GREEN}Latest versions loaded.${NC}"
+        nvm_install_use)
+            printf 'Installing Node %s...\n' "$version"
+            nvm install "$version" || return $?
+            printf 'Using Node %s...\n' "$version"
+            nvm use "$version"
             ;;
-        local)
-            WELCOME_CHECK_UPDATES=0
-            load_rows 0
-            SLASH_MESSAGE="${GREEN}Using local-only status.${NC}"
-            ;;
-        install|update)
-            if row_is_actionable "$selected"; then
-                install_selected_from_tui "$selected"
-                SLASH_MESSAGE="${GREEN}Status refreshed.${NC}"
-            else
-                SLASH_MESSAGE="${YELLOW}${COMMANDS[$selected]} is not actionable. Run /updates to check remote versions.${NC}"
-            fi
-            ;;
-        all)
-            if has_actionable_rows; then
-                install_all_from_tui
-                SLASH_MESSAGE="${GREEN}Status refreshed.${NC}"
-            else
-                SLASH_MESSAGE="${GREEN}Nothing actionable. Run /updates to check remote versions.${NC}"
-            fi
-            ;;
-        help|h|\?)
-            show_slash_help
-            SLASH_MESSAGE="${DIM}Use /nvm for Node versions or /updates for remote checks.${NC}"
-            ;;
-        q|quit|exit)
-            WELCOME_TUI_QUIT=1
+        nvm_uninstall)
+            printf 'Uninstalling Node %s...\n' "$version"
+            nvm uninstall "$version"
             ;;
         *)
-            SLASH_MESSAGE="${YELLOW}Unknown command: /${command}. Try /help.${NC}"
+            printf 'Unknown nvm action: %s\n' "$action"
+            return 2
             ;;
     esac
 }
 
-run_tui() {
-    local selected key message row_count
-    local command
+welcome_record_result() {
+    local result_file="$1" title="$2" rc="$3" output="$4"
 
-    [ "${#COMMANDS[@]}" -gt 0 ] || return 0
+    {
+        printf '%s\n' "$title"
+        if [ -n "$output" ]; then
+            printf '%s\n' "$output"
+        fi
+        if [ "$rc" -eq 0 ]; then
+            printf 'Action completed.\n'
+        else
+            printf 'Action failed with exit %s.\n' "$rc"
+        fi
+    } >"$result_file"
+}
 
-    selected=$(first_actionable_row)
-    message=""
+welcome_execute_action_file() {
+    local action_file="$1" result_file="$2"
+    local action command_name version include_updates output rc
+
+    action=$(welcome_action_value ACTION "$action_file")
+    include_updates=$(welcome_action_value INCLUDE_UPDATES "$action_file")
+    [ "$include_updates" = "1" ] || include_updates=0
+
+    case "$action" in
+        install_tool)
+            command_name=$(welcome_action_value COMMAND "$action_file")
+            output=$(welcome_run_tool_installer "$command_name" "$include_updates" 2>&1)
+            rc=$?
+            welcome_record_result "$result_file" "Tool action: $command_name" "$rc" "$output"
+            return 0
+            ;;
+        install_all)
+            output=$(welcome_run_all_installers "$include_updates" 2>&1)
+            rc=$?
+            welcome_record_result "$result_file" "Tool action: all" "$rc" "$output"
+            return 0
+            ;;
+        nvm_use|nvm_install_use|nvm_uninstall)
+            version=$(welcome_action_value VERSION "$action_file")
+            output=$(welcome_run_nvm_action "$action" "$version" 2>&1)
+            rc=$?
+            welcome_record_result "$result_file" "Node action: $version" "$rc" "$output"
+            return 0
+            ;;
+        quit|"")
+            return 1
+            ;;
+        *)
+            welcome_record_result "$result_file" "Unknown action" 2 "Unknown action: $action"
+            return 0
+            ;;
+    esac
+}
+
+welcome_main() {
+    local session_dir action_file result_file
+    local view="tools" include_updates=0 nvm_remote=0
+    local action next_view next_updates next_nvm_remote
+    local rc=0
+
+    welcome_require_runtime || return 0
+
+    session_dir=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-welcome.XXXXXX") || return 1
+    action_file="$session_dir/action.env"
+    result_file="$session_dir/result.txt"
 
     while true; do
-        row_count="${#COMMANDS[@]}"
-        if [ "$selected" -ge "$row_count" ]; then
-            selected=$((row_count - 1))
-        fi
+        rm -f "$action_file"
+        WELCOME_ACTION_FILE="$action_file" \
+            WELCOME_RESULT_FILE="$result_file" \
+            WELCOME_INITIAL_VIEW="$view" \
+            WELCOME_INCLUDE_UPDATES="$include_updates" \
+            WELCOME_NVM_REMOTE="$nvm_remote" \
+            WELCOME_DOTFILES_DIR="$WELCOME_DOTFILES_DIR" \
+            node "$WELCOME_APP" || rc=$?
 
-        render_tui "$selected" "$message"
-        if ! key=$(tui_read_key); then
-            break
-        fi
+        [ -f "$action_file" ] || break
 
-        message=""
-        SLASH_MESSAGE=""
-        case "$key" in
-            up|k|K)
-                selected=$(((selected + row_count - 1) % row_count))
+        action=$(welcome_action_value ACTION "$action_file")
+        [ "$action" != "quit" ] || break
+
+        next_view=$(welcome_action_value VIEW "$action_file")
+        next_updates=$(welcome_action_value INCLUDE_UPDATES "$action_file")
+        next_nvm_remote=$(welcome_action_value NVM_REMOTE "$action_file")
+
+        welcome_execute_action_file "$action_file" "$result_file" || break
+
+        case "$action" in
+            install_tool|install_all)
+                view="tools"
+                include_updates=0
+                nvm_remote=0
                 ;;
-            down|j|J)
-                selected=$(((selected + 1) % row_count))
+            nvm_use|nvm_install_use|nvm_uninstall)
+                view="nvm"
+                include_updates=0
+                nvm_remote=0
                 ;;
-            enter)
-                if row_is_actionable "$selected"; then
-                    install_selected_from_tui "$selected"
-                    selected=$(first_actionable_row)
-                    message="${GREEN}Status refreshed.${NC}"
-                else
-                    message="${YELLOW}${COMMANDS[$selected]} has no install action right now.${NC}"
-                fi
-                ;;
-            u|U)
-                if row_is_actionable "$selected"; then
-                    install_selected_from_tui "$selected"
-                    selected=$(first_actionable_row)
-                    message="${GREEN}Status refreshed.${NC}"
-                else
-                    message="${YELLOW}${COMMANDS[$selected]} has no update action right now. Run /updates first.${NC}"
-                fi
-                ;;
-            a|A)
-                if has_actionable_rows; then
-                    install_all_from_tui
-                    selected=$(first_actionable_row)
-                    message="${GREEN}Status refreshed.${NC}"
-                else
-                    message="${GREEN}Nothing actionable. Run /updates to check remote versions.${NC}"
-                fi
-                ;;
-            /)
-                prompt_slash_command || true
-                command="$SLASH_COMMAND"
-                execute_slash_command "$command" "$selected"
-                if [ "${WELCOME_TUI_QUIT:-0}" -eq 1 ]; then
-                    render_tui "$selected" "${DIM}Skipped installs.${NC}"
-                    printf '\n'
-                    return 0
-                fi
-                selected=$(first_actionable_row)
-                message="$SLASH_MESSAGE"
-                ;;
-            r|R)
-                tui_clear
-                printf '%sRefreshing local status...%s\n' "$DIM" "$NC"
-                WELCOME_CHECK_UPDATES=0
-                load_rows 0
-                selected=$(first_actionable_row)
-                message="${GREEN}Local status refreshed.${NC}"
-                ;;
-            q|Q|escape)
-                if [ "$WELCOME_CHECK_UPDATES" -eq 1 ]; then
-                    WELCOME_CHECK_UPDATES=0
-                    load_rows 0
-                    selected=$(first_actionable_row)
-                    message="${DIM}Back to local welcome.${NC}"
-                else
-                    render_tui "$selected" "${DIM}Skipped installs.${NC}"
-                    printf '\n'
-                    return 0
-                fi
+            *)
+                [ "$next_view" = "nvm" ] && view="nvm" || view="tools"
+                [ "$next_updates" = "1" ] && include_updates=1 || include_updates=0
+                [ "$next_nvm_remote" = "1" ] && nvm_remote=1 || nvm_remote=0
                 ;;
         esac
     done
+
+    rm -rf "$session_dir"
+    return "$rc"
 }
 
-load_rows 0
-if tui_supports; then
-    run_tui
-else
-    print_table
+if ! welcome_is_sourced; then
+    welcome_rc=0
+    if [ "${WELCOME_SH_NO_AUTO_RUN:-0}" != "1" ]; then
+        welcome_main "$@" || welcome_rc=$?
+    fi
+    exit "$welcome_rc"
+elif [ "${WELCOME_SH_NO_AUTO_RUN:-0}" != "1" ]; then
+    welcome_main "$@"
+    return $?
 fi
