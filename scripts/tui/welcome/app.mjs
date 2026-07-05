@@ -68,7 +68,60 @@ function statusCounts(rows) {
     }, {});
 }
 
-function WelcomePanel({view, width, height, rows, includeUpdates, nvmCurrent, nvmRemote}) {
+function actionKeyLines(view, mode) {
+    if (mode === 'slash') {
+        return [
+            'arrows  move command',
+            'Enter  run highlighted command',
+            'type  filter commands',
+            'Backspace  edit or close',
+            'Esc  close command menu'
+        ];
+    }
+
+    if (view === 'nvm') {
+        return [
+            'j/k or arrows  move selection',
+            'Enter  use/install selected',
+            'i  install version prompt',
+            'd/x  uninstall selected',
+            'r  load remote versions',
+            '/  commands · q/Esc  back'
+        ];
+    }
+
+    return [
+        'j/k or arrows  move selection',
+        'Enter  install/update selected',
+        'r  refresh local status',
+        '/  commands',
+        'q/Esc  local status or exit'
+    ];
+}
+
+function slashCommandMatches(filter) {
+    const normalized = filter.trim().replace(/^\/+/, '').toLowerCase();
+    const commands = SLASH_COMMANDS.filter(command => {
+        if (!normalized) {
+            return true;
+        }
+
+        return command.name.slice(1).startsWith(normalized)
+            || command.description.toLowerCase().includes(normalized);
+    });
+
+    if (!normalized) {
+        return commands;
+    }
+
+    return commands.sort((left, right) => {
+        const leftExact = left.name.slice(1) === normalized ? 1 : 0;
+        const rightExact = right.name.slice(1) === normalized ? 1 : 0;
+        return rightExact - leftExact;
+    });
+}
+
+function WelcomePanel({view, inputMode, width, height, rows, includeUpdates, nvmCurrent, nvmRemote}) {
     const username = process.env.USER ?? 'friend';
     const cwd = process.cwd().replace(process.env.HOME ?? '', '~');
     const leftWidth = Math.max(28, Math.min(48, Math.floor(width * 0.28)));
@@ -76,6 +129,7 @@ function WelcomePanel({view, width, height, rows, includeUpdates, nvmCurrent, nv
     const summary = view === 'nvm'
         ? `${nvmRemote ? 'remote loaded' : 'local only'}`
         : includeUpdates ? 'remote checked' : 'local only';
+    const actions = actionKeyLines(view, inputMode);
 
     return h(Box, {
         borderStyle: 'single',
@@ -86,9 +140,6 @@ function WelcomePanel({view, width, height, rows, includeUpdates, nvmCurrent, nv
     },
         h(Box, {width: leftWidth, flexDirection: 'column', alignItems: 'center', paddingX: 1},
             h(Text, {bold: true}, `Welcome back ${username}!`),
-            h(Text, {color: 'red'}, '   .----.   '),
-            h(Text, {color: 'red'}, '  /|    |\\  '),
-            h(Text, {color: 'red'}, '  \\|____|/  '),
             h(Text, {color: 'gray'}, view === 'nvm'
                 ? `Node ${nvmCurrent}`
                 : `Tools ${rows.length}  updates ${counts.update ?? 0}  missing ${counts.missing ?? 0}`
@@ -99,15 +150,11 @@ function WelcomePanel({view, width, height, rows, includeUpdates, nvmCurrent, nv
             ...Array.from({length: Math.max(1, height - 2)}, (_, index) => h(Text, {key: index, color: 'red'}, '│'))
         ),
         h(Box, {flexGrow: 1, flexDirection: 'column', paddingX: 1},
-            h(Text, {bold: true, color: 'red'}, 'Tips for getting started'),
-            h(Text, null, 'Type / to open the command menu'),
-            h(Text, null, view === 'nvm' ? 'Press r to load remote Node versions' : 'Run /updates before installing newer tools'),
-            h(Text, {color: 'gray'}, 'Enter runs the selected row; q backs out or exits'),
-            h(Text, {color: 'red'}, '─'.repeat(Math.max(1, width - leftWidth - 8))),
-            h(Text, {bold: true, color: 'red'}, 'Status'),
-            h(Text, null, view === 'nvm'
-                ? `Node screen · ${summary}`
-                : `Managed tools · ${summary}`
+            h(Text, {bold: true, color: 'red'}, 'Action keys'),
+            ...actions.map(line => h(Text, {key: line}, line)),
+            h(Text, {color: 'gray'}, view === 'nvm'
+                ? `Status: Node screen · ${summary}`
+                : `Status: Managed tools · ${summary}`
             )
         )
     );
@@ -188,29 +235,27 @@ function Prompt({mode, text, view}) {
     );
 }
 
-function CommandMenu({filter, maxRows}) {
-    const normalized = filter.trim().toLowerCase();
-    const commands = SLASH_COMMANDS.filter(command => {
-        if (!normalized) {
-            return true;
-        }
-
-        return command.name.slice(1).startsWith(normalized)
-            || command.description.toLowerCase().includes(normalized);
-    });
-    const shown = commands.slice(0, maxRows);
-
-    if (shown.length === 0) {
+function CommandMenu({commands, selected, maxRows}) {
+    if (commands.length === 0) {
         return h(Box, {flexDirection: 'column', flexShrink: 0},
             h(Text, {color: 'gray'}, 'No matching slash commands')
         );
     }
 
+    const start = visibleWindowStart(selected, commands.length, maxRows);
+    const end = Math.min(start + maxRows, commands.length);
+    const shown = commands.slice(start, end);
+
     return h(Box, {flexDirection: 'column', flexShrink: 0},
-        ...shown.map((command, index) => h(Box, {key: command.name},
-            h(Text, {color: index === 0 ? 'cyan' : 'gray'}, command.name.padEnd(12)),
-            h(Text, {color: index === 0 ? 'white' : 'gray'}, command.description)
-        ))
+        ...shown.map((command, offset) => {
+            const index = start + offset;
+            const isSelected = index === selected;
+
+            return h(Box, {key: command.name},
+                h(Text, {inverse: isSelected, color: isSelected ? 'cyan' : 'gray'}, command.name.padEnd(12)),
+                h(Text, {inverse: isSelected, color: isSelected ? 'white' : 'gray'}, command.description)
+            );
+        })
     );
 }
 
@@ -286,11 +331,25 @@ export function App({
     const [busy, setBusy] = useState('');
     const [inputMode, setInputMode] = useState('none');
     const [inputText, setInputText] = useState('');
+    const [commandSelected, setCommandSelected] = useState(0);
     const [messages, setMessages] = useInitialMessages(resultFile);
+    const headerHeight = height >= 16 ? 10 : Math.max(7, height - 6);
+    const commandMenuVisible = inputMode === 'slash';
+    const commandMenuMaxRows = commandMenuVisible
+        ? Math.max(1, Math.min(SLASH_COMMANDS.length, height - headerHeight - 6))
+        : 0;
+    const slashCommands = useMemo(() => slashCommandMatches(inputText), [inputText]);
 
     const appendMessage = useCallback((text, tone = 'info', role = 'welcome') => {
         setMessages(current => [...current.slice(-7), {role, tone, text}]);
     }, []);
+
+    useEffect(() => {
+        setCommandSelected(current => slashCommands.length === 0
+            ? 0
+            : Math.min(current, slashCommands.length - 1)
+        );
+    }, [slashCommands.length]);
 
     const refreshTools = useCallback(async (updates = includeUpdates, message = '') => {
         setBusy(updates ? 'Checking latest tool versions...' : 'Refreshing local tool status...');
@@ -393,9 +452,10 @@ export function App({
 
     const handleInputSubmit = useCallback(() => {
         if (inputMode === 'slash') {
-            const command = inputText;
+            const command = slashCommands[commandSelected]?.name ?? inputText;
             setInputMode('none');
             setInputText('');
+            setCommandSelected(0);
             handleSlash(command);
             return;
         }
@@ -404,6 +464,7 @@ export function App({
             const version = inputText.trim() || 'lts/*';
             setInputMode('none');
             setInputText('');
+            setCommandSelected(0);
             requestAction(nvmAction('nvm_install_use', version, nvmRemote));
             return;
         }
@@ -412,13 +473,14 @@ export function App({
             const answer = inputText.trim().toLowerCase();
             setInputMode('none');
             setInputText('');
+            setCommandSelected(0);
             if (answer === 'y' || answer === 'yes') {
                 requestAction(nvmAction('nvm_uninstall', selectedNvm.version, nvmRemote));
             } else {
                 appendMessage('Skipped uninstall.');
             }
         }
-    }, [appendMessage, handleSlash, inputMode, inputText, nvmRemote, requestAction, selectedNvm]);
+    }, [appendMessage, commandSelected, handleSlash, inputMode, inputText, nvmRemote, requestAction, selectedNvm, slashCommands]);
 
     useInput((input, key) => {
         if (busy) {
@@ -429,6 +491,15 @@ export function App({
             if (key.escape) {
                 setInputMode('none');
                 setInputText('');
+                setCommandSelected(0);
+                return;
+            }
+            if (inputMode === 'slash' && (key.upArrow || input === 'k' || input === 'K')) {
+                setCommandSelected(current => moveSelection(current, slashCommands.length, -1));
+                return;
+            }
+            if (inputMode === 'slash' && (key.downArrow || input === 'j' || input === 'J')) {
+                setCommandSelected(current => moveSelection(current, slashCommands.length, 1));
                 return;
             }
             if (key.return) {
@@ -436,11 +507,18 @@ export function App({
                 return;
             }
             if (key.backspace || key.delete) {
+                if (inputMode === 'slash' && inputText.length === 0) {
+                    setInputMode('none');
+                    setCommandSelected(0);
+                    return;
+                }
                 setInputText(current => current.slice(0, -1));
+                setCommandSelected(0);
                 return;
             }
             if (input && !key.ctrl && !key.meta) {
                 setInputText(current => `${current}${input}`);
+                setCommandSelected(0);
             }
             return;
         }
@@ -448,6 +526,7 @@ export function App({
         if (input === '/') {
             setInputMode('slash');
             setInputText('');
+            setCommandSelected(0);
             return;
         }
 
@@ -520,11 +599,6 @@ export function App({
         }
     });
 
-    const headerHeight = height >= 24 ? 10 : Math.max(7, Math.floor(height * 0.35));
-    const commandMenuVisible = inputMode === 'slash';
-    const commandMenuMaxRows = commandMenuVisible
-        ? Math.max(1, Math.min(SLASH_COMMANDS.length, height - headerHeight - 6))
-        : 0;
     const commandMenuHeight = commandMenuVisible ? commandMenuMaxRows : 0;
     const mainHeight = Math.max(3, height - headerHeight - commandMenuHeight - 3);
     const transcriptLimit = commandMenuVisible
@@ -540,6 +614,7 @@ export function App({
     return h(Box, {flexDirection: 'column', height, width},
         h(WelcomePanel, {
             view,
+            inputMode,
             width,
             height: headerHeight,
             rows: view === 'nvm' ? nvmRows : toolRows,
@@ -562,7 +637,7 @@ export function App({
             )
         ),
         inputMode === 'slash'
-            ? h(CommandMenu, {filter: inputText, maxRows: commandMenuMaxRows})
+            ? h(CommandMenu, {commands: slashCommands, selected: commandSelected, maxRows: commandMenuMaxRows})
             : null,
         h(InputBar, {mode: inputMode, text: inputText, view})
     );

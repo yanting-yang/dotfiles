@@ -32,7 +32,9 @@ WELCOME_NODE_VERSION=22 ./bootstrap.sh --yes
 Interactive login shells prompt before opening `welcome.sh`. The welcome UI is an
 Ink/React terminal app with local-first status checks. It opens in the terminal
 alternate screen with a Claude Code-style layout: a bordered welcome/status panel at
-the top, working content in the middle, and a fixed input bar at the bottom.
+the top, working content in the middle, and a fixed input bar at the bottom. While
+active, it sets the terminal window title to `Welcome` and restores the previous
+title on exit.
 
 Run it manually:
 
@@ -42,15 +44,15 @@ source ./welcome.sh
 
 Useful controls:
 
-- `j/k` or arrows: move selection
-- `Enter`: run the selected action
-- `/`: open the bottom command menu with command descriptions
+- `j/k` or arrows: move selection in either level
+- `/`: open the bottom command menu with command descriptions; arrows move the highlighted command, `Enter` runs it, and Backspace on an empty slash prompt returns to action keys
 - `/nvm`: open Node versions
 - `/updates` or `/check`: check remote versions for managed tools
 - `/install` or `/update`: install or update the selected actionable tool
 - `/help`: show slash command help in the transcript
-- `r`: refresh local tool status, or load remote Node versions inside NVM
-- `/quit`, `/exit`, or `q`: exit
+- Tools level: `Enter` installs or updates the selected tool, `r` refreshes local tool status, and `q`/`Esc` returns to local status or exits.
+- NVM level: `Enter` uses or installs the selected Node version, `i` opens an install prompt, `d`/`x` uninstalls the selected installed version, `r` loads remote versions, and `q`/`Esc` returns to tools.
+- `/quit` or `/exit`: exit from the slash command menu
 
 NVM actions are applied through the `welcome.sh` Bash bridge so `nvm use` affects the
 current shell.
