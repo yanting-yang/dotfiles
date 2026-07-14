@@ -66,6 +66,12 @@ print_tool_rows() {
         else
             printf 'false'
         fi
+        printf ',"uninstallable":'
+        if row_is_uninstallable "$i"; then
+            printf 'true'
+        else
+            printf 'false'
+        fi
         printf '}'
     done
 

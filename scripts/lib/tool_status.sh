@@ -2,6 +2,9 @@
 
 TOOL_STATUS_DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 TOOL_STATUS_INSTALL_DIR="$TOOL_STATUS_DOTFILES_DIR/scripts/install"
+TOOL_STATUS_LOCAL_PREFIX="${LOCAL_PREFIX:-$HOME/.local}"
+TOOL_STATUS_LOCAL_BIN_DIR="$TOOL_STATUS_LOCAL_PREFIX/bin"
+TOOL_STATUS_LOCAL_STOW_DIR="$TOOL_STATUS_LOCAL_PREFIX/stow"
 TOOL_STATUS_LATEST_UNCHECKED="unchecked"
 
 LATEST_UNCHECKED="$TOOL_STATUS_LATEST_UNCHECKED"
@@ -14,24 +17,67 @@ INSTALLERS=()
 STATUSES=()
 
 get_github_latest() {
-    local latest
+    local url="$1" cache_key="${2:-github}" latest
 
+    if tool_status_cache_read "$cache_key"; then
+        return 0
+    fi
     command -v curl >/dev/null 2>&1 || return 0
-    latest=$(curl -Ls -o /dev/null -w '%{url_effective}' "$1/releases/latest" 2>/dev/null) || return 0
+    latest=$(curl -Ls -o /dev/null -w '%{url_effective}' "$url/releases/latest" 2>/dev/null) || return 0
     latest="${latest##*/}"
     latest="${latest#v}"
 
     if [ -n "$latest" ] && [ "$latest" != "latest" ]; then
+        tool_status_cache_write "$cache_key" "$latest"
         printf '%s' "$latest"
     fi
 }
 
 get_stow_latest() {
+    local latest
+
+    if tool_status_cache_read stow; then
+        return 0
+    fi
     command -v curl >/dev/null 2>&1 || return 0
-    curl -Ls https://ftp.gnu.org/gnu/stow/ 2>/dev/null \
+    latest=$(curl -Ls https://ftp.gnu.org/gnu/stow/ 2>/dev/null \
         | sed -n 's/.*stow-\([0-9][0-9.]*\)\.tar\.gz.*/\1/p' \
         | sort -V \
-        | tail -1
+        | tail -1)
+
+    if [ -n "$latest" ]; then
+        tool_status_cache_write stow "$latest"
+        printf '%s' "$latest"
+    fi
+}
+
+tool_status_cache_read() {
+    local key="$1" file cached
+
+    [ -n "${WELCOME_UPDATE_CACHE_DIR:-}" ] || return 1
+    tool_status_cache_key_is_safe "$key" || return 1
+
+    file="$WELCOME_UPDATE_CACHE_DIR/$key.latest"
+    [ -s "$file" ] || return 1
+    IFS= read -r cached <"$file" || return 1
+    [ -n "$cached" ] || return 1
+    printf '%s' "$cached"
+}
+
+tool_status_cache_write() {
+    local key="$1" value="$2" file
+
+    [ -n "${WELCOME_UPDATE_CACHE_DIR:-}" ] || return 0
+    tool_status_cache_key_is_safe "$key" || return 0
+    [ -n "$value" ] || return 0
+
+    mkdir -p "$WELCOME_UPDATE_CACHE_DIR" 2>/dev/null || return 0
+    file="$WELCOME_UPDATE_CACHE_DIR/$key.latest"
+    printf '%s\n' "$value" >"$file" 2>/dev/null || true
+}
+
+tool_status_cache_key_is_safe() {
+    [[ "$1" =~ ^[A-Za-z0-9_.-]+$ ]]
 }
 
 get_cmd_path() {
@@ -116,6 +162,19 @@ add_cmd_row() {
     fi
 }
 
+tool_status_path_mentions_prefix() {
+    local path="$1" prefix="$2"
+
+    case "$path" in
+        "$prefix"|"$prefix"/*|*" -> $prefix"|*" -> $prefix"/*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 load_rows() {
     local include_updates="${1:-0}"
     local code_latest code_current
@@ -129,8 +188,8 @@ load_rows() {
     clear_rows
 
     code_latest="$LATEST_UNCHECKED"
-    [ "$include_updates" -eq 1 ] && code_latest=$(get_github_latest https://github.com/microsoft/vscode)
     if [ -x "$code_bin" ]; then
+        [ "$include_updates" -eq 1 ] && code_latest=$(get_github_latest https://github.com/microsoft/vscode code)
         code_current=$("$code_bin" --version 2>/dev/null | head -1 | awk '{print $2}')
         add_row "code" "$code_bin" "$code_current" "$code_latest" "$TOOL_STATUS_INSTALL_DIR/code.sh"
     else
@@ -138,8 +197,8 @@ load_rows() {
     fi
 
     gh_latest="$LATEST_UNCHECKED"
-    [ "$include_updates" -eq 1 ] && gh_latest=$(get_github_latest https://github.com/cli/cli)
     if command -v gh >/dev/null 2>&1; then
+        [ "$include_updates" -eq 1 ] && gh_latest=$(get_github_latest https://github.com/cli/cli gh)
         gh_current=$(gh --version 2>/dev/null | awk 'NR==1{print $3}')
         add_cmd_row "gh" "gh" "$gh_current" "$gh_latest" "$TOOL_STATUS_INSTALL_DIR/gh.sh"
     else
@@ -147,8 +206,8 @@ load_rows() {
     fi
 
     nvim_latest="$LATEST_UNCHECKED"
-    [ "$include_updates" -eq 1 ] && nvim_latest=$(get_github_latest https://github.com/neovim/neovim)
     if command -v nvim >/dev/null 2>&1; then
+        [ "$include_updates" -eq 1 ] && nvim_latest=$(get_github_latest https://github.com/neovim/neovim nvim)
         nvim_current=$(NVIM_LOG_FILE="${NVIM_LOG_FILE:-/tmp/nvim-welcome.log}" nvim --version 2>/dev/null \
             | awk 'NR==1{print $2}' \
             | sed 's/^v//')
@@ -158,9 +217,9 @@ load_rows() {
     fi
 
     nvm_latest="$LATEST_UNCHECKED"
-    [ "$include_updates" -eq 1 ] && nvm_latest=$(get_github_latest https://github.com/nvm-sh/nvm)
     nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
     if [ -s "$nvm_dir/nvm.sh" ]; then
+        [ "$include_updates" -eq 1 ] && nvm_latest=$(get_github_latest https://github.com/nvm-sh/nvm nvm)
         # shellcheck source=/dev/null
         source "$nvm_dir/nvm.sh" --no-use
         nvm_current=$(nvm --version 2>/dev/null)
@@ -170,8 +229,8 @@ load_rows() {
     fi
 
     stow_latest="$LATEST_UNCHECKED"
-    [ "$include_updates" -eq 1 ] && stow_latest=$(get_stow_latest)
     if command -v stow >/dev/null 2>&1; then
+        [ "$include_updates" -eq 1 ] && stow_latest=$(get_stow_latest)
         stow_current=$(stow --version 2>/dev/null | grep -oE '[0-9.]+' | head -1)
         add_cmd_row "stow" "stow" "$stow_current" "$stow_latest" "$TOOL_STATUS_INSTALL_DIR/stow.sh"
     else
@@ -179,13 +238,47 @@ load_rows() {
     fi
 
     tmux_latest="$LATEST_UNCHECKED"
-    [ "$include_updates" -eq 1 ] && tmux_latest=$(get_github_latest https://github.com/tmux/tmux-builds)
     if command -v tmux >/dev/null 2>&1; then
+        [ "$include_updates" -eq 1 ] && tmux_latest=$(get_github_latest https://github.com/tmux/tmux-builds tmux)
         tmux_current=$(tmux -V 2>/dev/null | awk '{print $2}')
         add_cmd_row "tmux" "tmux" "$tmux_current" "$tmux_latest" "$TOOL_STATUS_INSTALL_DIR/tmux.sh"
     else
         add_missing_row "tmux" "$tmux_latest" "$TOOL_STATUS_INSTALL_DIR/tmux.sh"
     fi
+}
+
+row_is_uninstallable() {
+    local index="$1" command path nvm_dir
+
+    [ "${PATHS[$index]}" != "not installed" ] || return 1
+
+    command="${COMMANDS[$index]}"
+    path="${PATHS[$index]}"
+
+    case "$command" in
+        code)
+            [ "$path" = "$HOME/code" ] && [ -e "$HOME/code" ]
+            ;;
+        gh|nvim)
+            [ -d "$TOOL_STATUS_LOCAL_STOW_DIR/$command" ] \
+                && tool_status_path_mentions_prefix "$path" "$TOOL_STATUS_LOCAL_PREFIX"
+            ;;
+        nvm)
+            nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
+            [ -d "$nvm_dir" ] && tool_status_path_mentions_prefix "$path" "$nvm_dir"
+            ;;
+        stow)
+            [ -e "$TOOL_STATUS_LOCAL_BIN_DIR/stow" ] \
+                && tool_status_path_mentions_prefix "$path" "$TOOL_STATUS_LOCAL_PREFIX"
+            ;;
+        tmux)
+            [ -e "$TOOL_STATUS_LOCAL_BIN_DIR/tmux" ] \
+                && tool_status_path_mentions_prefix "$path" "$TOOL_STATUS_LOCAL_PREFIX"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 row_is_actionable() {

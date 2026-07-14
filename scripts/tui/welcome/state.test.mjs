@@ -8,6 +8,7 @@ import {
     normalizeSlashCommand,
     resolveSlashCommand,
     toolAction,
+    toolUninstallAction,
     visibleWindowStart
 } from './state.mjs';
 
@@ -57,6 +58,12 @@ test('builds action file payloads', () => {
         ACTION: 'install_tool',
         COMMAND: 'gh',
         INCLUDE_UPDATES: '1',
+        VIEW: 'tools'
+    });
+    assert.deepEqual(toolUninstallAction({command: 'gh'}, false), {
+        ACTION: 'uninstall_tool',
+        COMMAND: 'gh',
+        INCLUDE_UPDATES: '0',
         VIEW: 'tools'
     });
     assert.deepEqual(actionForNvmRow({version: 'v24.0.0', status: 'available'}, true), {

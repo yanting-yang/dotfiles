@@ -118,6 +118,15 @@ export function toolAction(row, includeUpdates) {
     };
 }
 
+export function toolUninstallAction(row, includeUpdates) {
+    return {
+        ACTION: 'uninstall_tool',
+        COMMAND: row.command,
+        INCLUDE_UPDATES: includeUpdates ? '1' : '0',
+        VIEW: 'tools'
+    };
+}
+
 export function nvmAction(action, version, includeRemote) {
     return {
         ACTION: action,

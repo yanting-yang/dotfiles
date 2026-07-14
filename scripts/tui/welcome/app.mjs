@@ -10,6 +10,7 @@ import {
     resolveSlashCommand,
     SLASH_COMMANDS,
     toolAction,
+    toolUninstallAction,
     visibleWindowStart
 } from './state.mjs';
 import {loadNvm, loadTools, readResultMessage, writeAction} from './io.mjs';
@@ -93,6 +94,7 @@ function actionKeyLines(view, mode) {
     return [
         'j/k or arrows  move selection',
         'Enter  install/update selected',
+        'd/x  uninstall selected',
         'r  refresh local status',
         '/  commands',
         'q/Esc  local status or exit'
@@ -228,10 +230,13 @@ function Prompt({mode, text, view}) {
     if (mode === 'nvm-uninstall') {
         return h(Text, {color: 'yellow'}, `uninstall selected? [y/N] ${text}`);
     }
+    if (mode === 'tool-uninstall') {
+        return h(Text, {color: 'yellow'}, `uninstall selected command? [y/N] ${text}`);
+    }
 
     return h(Text, {color: 'gray'}, view === 'nvm'
         ? 'j/k move  Enter use/install  i install  d uninstall  r remote  / command  q back'
-        : 'j/k move  Enter install/update  / command  r local refresh  q quit'
+        : 'j/k move  Enter install/update  d uninstall  / command  r local refresh  q quit'
     );
 }
 
@@ -417,6 +422,19 @@ export function App({
         requestAction(toolAction(selectedTool, includeUpdates));
     }, [appendMessage, includeUpdates, requestAction, selectedTool]);
 
+    const beginToolUninstall = useCallback(() => {
+        if (!selectedTool) {
+            appendMessage('No managed tool is selected.', 'warn');
+            return;
+        }
+        if (!selectedTool.uninstallable) {
+            appendMessage(`${selectedTool.command} has no uninstall action right now.`, 'warn');
+            return;
+        }
+        setInputMode('tool-uninstall');
+        setInputText('');
+    }, [appendMessage, selectedTool]);
+
     const handleSlash = useCallback(commandText => {
         const result = resolveSlashCommand(commandText, view);
         appendMessage(`/${commandText.trim().replace(/^\/+/, '') || 'help'}`, 'info', 'you');
@@ -479,8 +497,25 @@ export function App({
             } else {
                 appendMessage('Skipped uninstall.');
             }
+            return;
         }
-    }, [appendMessage, commandSelected, handleSlash, inputMode, inputText, nvmRemote, requestAction, selectedNvm, slashCommands]);
+
+        if (inputMode === 'tool-uninstall') {
+            const answer = inputText.trim().toLowerCase();
+            setInputMode('none');
+            setInputText('');
+            setCommandSelected(0);
+            if (answer === 'y' || answer === 'yes') {
+                if (!selectedTool) {
+                    appendMessage('No managed tool is selected.', 'warn');
+                    return;
+                }
+                requestAction(toolUninstallAction(selectedTool, includeUpdates));
+            } else {
+                appendMessage('Skipped uninstall.');
+            }
+        }
+    }, [appendMessage, commandSelected, handleSlash, includeUpdates, inputMode, inputText, nvmRemote, requestAction, selectedNvm, selectedTool, slashCommands]);
 
     useInput((input, key) => {
         if (busy) {
@@ -584,6 +619,11 @@ export function App({
             }
             setInputMode('nvm-uninstall');
             setInputText('');
+            return;
+        }
+
+        if (view === 'tools' && (input === 'd' || input === 'D' || input === 'x' || input === 'X')) {
+            beginToolUninstall();
             return;
         }
 

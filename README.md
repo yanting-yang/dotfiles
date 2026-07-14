@@ -50,7 +50,7 @@ Useful controls:
 - `/updates` or `/check`: check remote versions for managed tools
 - `/install` or `/update`: install or update the selected actionable tool
 - `/help`: show slash command help in the transcript
-- Tools level: `Enter` installs or updates the selected tool, `r` refreshes local tool status, and `q`/`Esc` returns to local status or exits.
+- Tools level: `Enter` installs or updates the selected tool, `d`/`x` uninstalls the selected managed tool, `r` refreshes local tool status, and `q`/`Esc` returns to local status or exits.
 - NVM level: `Enter` uses or installs the selected Node version, `i` opens an install prompt, `d`/`x` uninstalls the selected installed version, `r` loads remote versions, and `q`/`Esc` returns to tools.
 - `/quit` or `/exit`: exit from the slash command menu
 
