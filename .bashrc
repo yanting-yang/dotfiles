@@ -11,35 +11,38 @@ HISTFILE="$HOME/.local/state/bash_history"
 HISTFILESIZE=2000
 HISTSIZE=1000
 
-# 1. Capture the start time before the command runs
-function timer_start() {
-    if [ -z "$_cmd_start_time" ]; then
-        _cmd_start_time=$SECONDS
-    fi
-}
-trap 'timer_start' DEBUG
+# Record when each command starts, without a DEBUG trap. PS0 (bash 4.4+) is
+# expanded once, right after a command line is read but just before it runs.
+#
+# Dissecting PS0='${_ps0:0:$((_cmd_start=SECONDS, _cmd_run=1, 0))}':
+#   ${_ps0:0:N}  substring of _ps0 (empty) at offset 0, length N -> expands to
+#                nothing; it exists only to host the arithmetic in the length.
+#   $(( ... ))   arithmetic runs in THIS shell (unlike $(...), a subshell), so
+#                its assignments persist. The comma operator runs each in turn:
+#                  _cmd_start=SECONDS  remember when the command started
+#                  _cmd_run=1          flag that a command actually ran
+#                                      (an empty Enter never expands PS0)
+#                  0                   the value used as the substring length
+# _ps0 must stay set (even empty): bash skips the substring's length arithmetic
+# when the base variable is unset, which would drop the side effect entirely.
+_ps0=
+PS0='${_ps0:0:$((_cmd_start=SECONDS, _cmd_run=1, 0))}'
 
-# 2. Calculate the duration after the command finishes
+# Format the elapsed time right before drawing the next prompt.
 function timer_calc() {
-    _cmd_duration_str=""
+    [ -n "$_cmd_run" ] || { _cmd_duration_str=""; return; }
+    _cmd_run=
 
-    local delta=$((SECONDS - _cmd_start_time))
-    unset _cmd_start_time # Reset the timer in the main shell
-
-    local hours=$((delta / 3600))
-    local mins=$(( (delta % 3600) / 60 ))
-    local secs=$((delta % 60))
-
+    local delta=$((SECONDS - _cmd_start))
     _cmd_duration_str="["
-    (( hours > 0 )) && _cmd_duration_str+="${hours}h "
-    (( mins > 0 )) && _cmd_duration_str+="${mins}m "
-    _cmd_duration_str+="${secs}s]"
+    (( delta >= 3600 )) && _cmd_duration_str+="$((delta / 3600))h "
+    (( delta >= 60 ))   && _cmd_duration_str+="$((delta % 3600 / 60))m "
+    # Trailing newlines live here, not in PS1, so an empty Enter stays compact.
+    _cmd_duration_str+="$((delta % 60))s]"$'\n\n'
 }
-
-# 3. Tell bash to run the calculation right before drawing the prompt
 PROMPT_COMMAND="timer_calc; ${PROMPT_COMMAND}"
 
-PS1='${_cmd_duration_str}\n\n\u@\h:\w\$ '
+PS1='${_cmd_duration_str}\u@\h:\w\$ '
 
 # If this is an xterm set the title to user@host:dir
 case "$TERM" in
