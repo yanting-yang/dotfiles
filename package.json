@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "24.x"
   },
   "scripts": {
+    "sync-node-version": "node scripts/sync-node-version.mjs",
+    "check-node-version": "node scripts/sync-node-version.mjs --check",
+    "pretest": "npm run check-node-version",
     "welcome": "node scripts/tui/welcome/cli.mjs",
     "test": "node --test scripts/tui/welcome/*.test.mjs && bash scripts/tui/welcome/bridge.test.sh"
   },

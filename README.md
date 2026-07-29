@@ -16,15 +16,21 @@ Apply the links:
 ./bootstrap.sh --yes
 ```
 
-`bootstrap.sh` links the managed dotfiles into `$HOME`, backs up existing targets under
+`bootstrap.sh` links the managed dotfiles into `$HOME`, backs up existing targets and
+legacy `.lesshst`, `.bash_history`, and `.bash_logout` files under
 `$HOME/.dotfiles-backup/`, and prepares the Ink-based welcome TUI. On a new system it
 may install or activate nvm/Node and then run `npm ci` in this repository.
 
-The welcome TUI requires Node `>=22`. Bootstrap installs Node `24` through nvm when a
-compatible Node/npm pair is not already available. Override that with:
+The welcome TUI's Node major is pinned in `.nvmrc`. Bootstrap links that file to
+`$HOME/.nvmrc` and installs the pinned major through nvm when a compatible Node/npm
+pair is not already available. `WELCOME_NODE_VERSION` can select a specific release
+within the pinned major.
+
+The package and lockfile engine ranges are generated mirrors. After changing
+`.nvmrc`, synchronize them with:
 
 ```sh
-WELCOME_NODE_VERSION=22 ./bootstrap.sh --yes
+npm run sync-node-version
 ```
 
 ## Welcome TUI
@@ -64,6 +70,7 @@ The intentionally supported slash commands are `/nvm`, `/updates`, `/check`,
 ## Layout
 
 - `.profile`, `.bashrc`, `welcome.sh`, `bootstrap.sh`: root shell entry points.
+- `.nvmrc`: canonical Node major, managed as `$HOME/.nvmrc`.
 - `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.ssh/config`: managed configuration.
 - `scripts/lib/`: shared Bash helpers for installers, status checks, and terminal utilities.
 - `scripts/install/`: explicit installers for managed tools.

@@ -5,9 +5,12 @@ DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DRY_RUN=0
 YES=0
 BACKUP_DIR=""
-WELCOME_NODE_VERSION="${WELCOME_NODE_VERSION:-24}"
+
+# shellcheck source=scripts/lib/node.sh
+source "$DOTFILES_DIR/scripts/lib/node.sh"
 
 SOURCES=(
+    "$DOTFILES_DIR/.nvmrc"
     "$DOTFILES_DIR/.profile"
     "$DOTFILES_DIR/.bashrc"
     "$DOTFILES_DIR/.ssh/config"
@@ -16,11 +19,18 @@ SOURCES=(
 )
 
 TARGETS=(
+    "$HOME/.nvmrc"
     "$HOME/.profile"
     "$HOME/.bashrc"
     "$HOME/.ssh/config"
     "$HOME/.config/git"
     "$HOME/.config/nvim"
+)
+
+BACKUP_ONLY_TARGETS=(
+    "$HOME/.lesshst"
+    "$HOME/.bash_history"
+    "$HOME/.bash_logout"
 )
 
 usage() {
@@ -37,6 +47,12 @@ die() {
     printf 'error: %s\n' "$*" >&2
     exit 1
 }
+
+NODE_VERSION_FILE="$DOTFILES_DIR/.nvmrc"
+if ! WELCOME_NODE_MAJOR=$(node_major_from_file "$NODE_VERSION_FILE"); then
+    die "invalid Node version file: $NODE_VERSION_FILE (expected one numeric major)"
+fi
+WELCOME_NODE_VERSION="${WELCOME_NODE_VERSION:-$WELCOME_NODE_MAJOR}"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -116,7 +132,7 @@ node_satisfies_welcome() {
 
     command -v node >/dev/null 2>&1 || return 1
     major=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')
-    [ "$major" -ge 22 ]
+    [ "$major" -eq "$WELCOME_NODE_MAJOR" ]
 }
 
 welcome_deps_installed() {
@@ -135,13 +151,23 @@ welcome_dependency_status() {
 }
 
 print_plan() {
-    local i status
+    local i status target
     local welcome_status
 
     printf 'Dotfile links:\n'
     for i in "${!SOURCES[@]}"; do
         status=$(target_status "${SOURCES[$i]}" "${TARGETS[$i]}")
         printf '  %-7s %s -> %s\n' "$status" "$(display_path "${TARGETS[$i]}")" "${SOURCES[$i]}"
+    done
+
+    printf '\nBackup-only files:\n'
+    for target in "${BACKUP_ONLY_TARGETS[@]}"; do
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            status="backup"
+        else
+            status="absent"
+        fi
+        printf '  %-7s %s\n' "$status" "$(display_path "$target")"
     done
 
     welcome_status=$(welcome_dependency_status)
@@ -228,6 +254,16 @@ apply_links() {
     done
 }
 
+backup_only_targets() {
+    local target
+
+    for target in "${BACKUP_ONLY_TARGETS[@]}"; do
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            backup_target "$target"
+        fi
+    done
+}
+
 load_or_install_welcome_node() {
     local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
     local nvm_installer="$DOTFILES_DIR/scripts/install/nvm.sh"
@@ -249,7 +285,7 @@ load_or_install_welcome_node() {
     nvm alias default "$WELCOME_NODE_VERSION" >/dev/null
     nvm use "$WELCOME_NODE_VERSION"
 
-    node_satisfies_welcome || die "Node >=22 is still unavailable after installing Node $WELCOME_NODE_VERSION"
+    node_satisfies_welcome || die "Node $WELCOME_NODE_MAJOR.x is still unavailable after installing Node $WELCOME_NODE_VERSION"
     command -v npm >/dev/null 2>&1 || die "npm is unavailable after installing Node $WELCOME_NODE_VERSION"
 }
 
@@ -275,6 +311,7 @@ fi
 
 confirm_apply || exit 0
 apply_links
+backup_only_targets
 install_welcome_deps
 
 if [ -n "$BACKUP_DIR" ]; then

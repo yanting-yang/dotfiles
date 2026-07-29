@@ -12,22 +12,29 @@ WELCOME_LOCAL_STOW_DIR="$WELCOME_LOCAL_PREFIX/stow"
 source "$WELCOME_LIB_DIR/code.sh"
 # shellcheck source=scripts/lib/tool_status.sh
 source "$WELCOME_LIB_DIR/tool_status.sh"
+# shellcheck source=scripts/lib/node.sh
+source "$WELCOME_LIB_DIR/node.sh"
 
 welcome_is_sourced() {
     [ "${#BASH_SOURCE[@]}" -gt 1 ]
 }
 
 welcome_require_runtime() {
-    local node_major
+    local node_major required_node_major
+
+    if ! required_node_major=$(node_major_from_file "$WELCOME_DOTFILES_DIR/.nvmrc"); then
+        printf 'Welcome requires one numeric Node major in %s.\n' "$WELCOME_DOTFILES_DIR/.nvmrc"
+        return 1
+    fi
 
     if ! command -v node >/dev/null 2>&1; then
-        printf 'Welcome requires Node >=22. Run npm install in %s after Node is available.\n' "$WELCOME_DOTFILES_DIR"
+        printf 'Welcome requires Node %s.x. Run npm install in %s after Node is available.\n' "$required_node_major" "$WELCOME_DOTFILES_DIR"
         return 1
     fi
 
     node_major=$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')
-    if [ "$node_major" -lt 22 ]; then
-        printf 'Welcome requires Node >=22; current node is %s.\n' "$(node --version 2>/dev/null || printf unknown)"
+    if [ "$node_major" -ne "$required_node_major" ]; then
+        printf 'Welcome requires Node %s.x; current node is %s.\n' "$required_node_major" "$(node --version 2>/dev/null || printf unknown)"
         return 1
     fi
 
