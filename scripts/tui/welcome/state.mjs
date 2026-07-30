@@ -1,10 +1,5 @@
 export const SLASH_COMMANDS = [
     {
-        name: '/nvm',
-        description: 'Open Node versions',
-        result: {type: 'view', view: 'nvm', message: 'Opening Node versions.'}
-    },
-    {
         name: '/updates',
         description: 'Check latest tool versions',
         result: {type: 'updates'}
@@ -68,11 +63,6 @@ export function firstActionableTool(rows = []) {
     return index >= 0 ? index : 0;
 }
 
-export function firstCurrentNvm(rows = []) {
-    const index = rows.findIndex(row => row.current || row.status === 'active');
-    return index >= 0 ? index : 0;
-}
-
 export function visibleWindowStart(selected, count, visibleCount) {
     if (count <= visibleCount || visibleCount <= 0) {
         return 0;
@@ -89,7 +79,7 @@ export function normalizeSlashCommand(input) {
     return command.toLowerCase();
 }
 
-export function resolveSlashCommand(input, view) {
+export function resolveSlashCommand(input) {
     const command = normalizeSlashCommand(input);
     const slashCommand = `/${command}`;
     const match = SLASH_COMMANDS.find(candidate => candidate.name === slashCommand);
@@ -125,25 +115,4 @@ export function toolUninstallAction(row, includeUpdates) {
         INCLUDE_UPDATES: includeUpdates ? '1' : '0',
         VIEW: 'tools'
     };
-}
-
-export function nvmAction(action, version, includeRemote) {
-    return {
-        ACTION: action,
-        VERSION: version,
-        VIEW: 'nvm',
-        NVM_REMOTE: includeRemote ? '1' : '0'
-    };
-}
-
-export function actionForNvmRow(row, includeRemote) {
-    if (!row) {
-        return null;
-    }
-
-    if (row.status === 'available') {
-        return nvmAction('nvm_install_use', row.version, includeRemote);
-    }
-
-    return nvmAction('nvm_use', row.version, includeRemote);
 }

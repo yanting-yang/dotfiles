@@ -357,7 +357,7 @@ nvm_tui_use_selected() {
 
     if ! nvm_tui_is_sourced; then
         printf "\n${NVM_TUI_YELLOW}Note:${NVM_TUI_NC} this use action only affects this child shell."
-        printf '\nSource this script or open it from the welcome TUI to persist it.\n'
+        printf '\nSource this script to persist it in the current shell.\n'
     fi
 }
 

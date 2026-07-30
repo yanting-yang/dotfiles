@@ -51,6 +51,23 @@ get_stow_latest() {
     fi
 }
 
+get_nvm_node_latest() {
+    local major="$1" cache_key="node-$1" latest
+
+    if tool_status_cache_read "$cache_key"; then
+        return 0
+    fi
+    [[ "$major" =~ ^[1-9][0-9]*$ ]] || return 0
+    command -v nvm >/dev/null 2>&1 || return 0
+
+    latest=$(NVM_VERSION_ONLY=1 nvm version-remote "$major" 2>/dev/null) || return 0
+    latest="${latest#v}"
+    [[ "$latest" =~ ^${major}\.[0-9]+\.[0-9]+$ ]] || return 0
+
+    tool_status_cache_write "$cache_key" "$latest"
+    printf '%s' "$latest"
+}
+
 tool_status_cache_read() {
     local key="$1" file cached
 
@@ -106,13 +123,42 @@ latest_is_newer() {
         && [ "$latest" != "$current" ]
 }
 
+node_version_is_valid() {
+    [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+node_version_is_newer() {
+    local current="$1" latest="$2"
+    local current_major current_minor current_patch
+    local latest_major latest_minor latest_patch
+
+    node_version_is_valid "$current" || return 1
+    node_version_is_valid "$latest" || return 1
+    IFS=. read -r current_major current_minor current_patch <<<"$current"
+    IFS=. read -r latest_major latest_minor latest_patch <<<"$latest"
+
+    ((10#$latest_major > 10#$current_major)) && return 0
+    ((10#$latest_major < 10#$current_major)) && return 1
+    ((10#$latest_minor > 10#$current_minor)) && return 0
+    ((10#$latest_minor < 10#$current_minor)) && return 1
+    ((10#$latest_patch > 10#$current_patch))
+}
+
 row_status() {
-    local path="$1" current="$2" latest="$3"
+    local path="$1" current="$2" latest="$3" command="${4:-}"
 
     if [ "$path" = "not installed" ]; then
         printf 'missing'
     elif [ "$latest" = "$LATEST_UNCHECKED" ]; then
         printf 'installed'
+    elif [ "$command" = "node" ]; then
+        if node_version_is_newer "$current" "$latest"; then
+            printf 'update'
+        elif node_version_is_valid "$current" && node_version_is_valid "$latest"; then
+            printf 'current'
+        else
+            printf 'check'
+        fi
     elif latest_is_newer "$current" "$latest"; then
         printf 'update'
     elif [ "$latest" = "unknown" ] || [ "$current" = "unknown" ]; then
@@ -137,7 +183,7 @@ add_row() {
 
     [ -n "$current" ] || current="unknown"
     [ -n "$latest" ] || latest="unknown"
-    status=$(row_status "$path" "$current" "$latest")
+    status=$(row_status "$path" "$current" "$latest" "$command")
 
     COMMANDS+=("$command")
     PATHS+=("$path")
@@ -179,13 +225,23 @@ load_rows() {
     local include_updates="${1:-0}"
     local code_latest code_current
     local gh_latest gh_current
+    local node_latest node_current node_major
     local nvim_latest nvim_current
-    local nvm_latest nvm_current nvm_dir
+    local nvm_latest nvm_current nvm_dir nvm_available=0
     local stow_latest stow_current
     local tmux_latest tmux_current
     local code_bin="$HOME/code"
 
     clear_rows
+
+    nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
+    if command -v nvm >/dev/null 2>&1; then
+        nvm_available=1
+    elif [ -s "$nvm_dir/nvm.sh" ]; then
+        # shellcheck source=/dev/null
+        source "$nvm_dir/nvm.sh" --no-use
+        command -v nvm >/dev/null 2>&1 && nvm_available=1
+    fi
 
     code_latest="$LATEST_UNCHECKED"
     if [ -x "$code_bin" ]; then
@@ -205,6 +261,24 @@ load_rows() {
         add_missing_row "gh" "$gh_latest" "$TOOL_STATUS_INSTALL_DIR/gh.sh"
     fi
 
+    node_latest="$LATEST_UNCHECKED"
+    if command -v node >/dev/null 2>&1; then
+        node_current=$(node --version 2>/dev/null)
+        node_current="${node_current#v}"
+        [[ "$node_current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || node_current="unknown"
+        if [ "$include_updates" -eq 1 ]; then
+            node_major="${node_current%%.*}"
+            node_latest=""
+            if [ "$nvm_available" -eq 1 ]; then
+                node_latest=$(get_nvm_node_latest "$node_major")
+            fi
+            [ -n "$node_latest" ] || node_latest="unknown"
+        fi
+        add_cmd_row "node" "node" "$node_current" "$node_latest" ""
+    else
+        add_missing_row "node" "$node_latest"
+    fi
+
     nvim_latest="$LATEST_UNCHECKED"
     if command -v nvim >/dev/null 2>&1; then
         [ "$include_updates" -eq 1 ] && nvim_latest=$(get_github_latest https://github.com/neovim/neovim nvim)
@@ -217,12 +291,13 @@ load_rows() {
     fi
 
     nvm_latest="$LATEST_UNCHECKED"
-    nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
     if [ -s "$nvm_dir/nvm.sh" ]; then
         [ "$include_updates" -eq 1 ] && nvm_latest=$(get_github_latest https://github.com/nvm-sh/nvm nvm)
-        # shellcheck source=/dev/null
-        source "$nvm_dir/nvm.sh" --no-use
-        nvm_current=$(nvm --version 2>/dev/null)
+        if [ "$nvm_available" -eq 1 ]; then
+            nvm_current=$(nvm --version 2>/dev/null)
+        else
+            nvm_current="unknown"
+        fi
         add_row "nvm" "$nvm_dir/nvm.sh (shell function)" "$nvm_current" "$nvm_latest" "$TOOL_STATUS_INSTALL_DIR/nvm.sh"
     else
         add_missing_row "nvm" "$nvm_latest" "$TOOL_STATUS_INSTALL_DIR/nvm.sh"
@@ -283,6 +358,12 @@ row_is_uninstallable() {
 
 row_is_actionable() {
     local index="$1"
+
+    if [ "${COMMANDS[$index]}" = "node" ]; then
+        [ "${PATHS[$index]}" != "not installed" ] || return 1
+        node_version_is_newer "${CURRENTS[$index]}" "${LATESTS[$index]}"
+        return
+    fi
 
     [ -n "${INSTALLERS[$index]}" ] || return 1
     [ "${PATHS[$index]}" = "not installed" ] && return 0

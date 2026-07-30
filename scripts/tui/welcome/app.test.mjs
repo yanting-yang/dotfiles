@@ -26,8 +26,7 @@ test('renders the welcome status rows', async () => {
     };
 
     const loaders = {
-        loadTools: async () => tools,
-        loadNvm: async () => ({kind: 'nvm', ok: true, current: 'none', remoteLoaded: false, rows: []})
+        loadTools: async () => tools
     };
 
     const {lastFrame, unmount} = render(h(App, {
@@ -70,8 +69,7 @@ test('confirms tool uninstall action', async () => {
     };
 
     const loaders = {
-        loadTools: async () => tools,
-        loadNvm: async () => ({kind: 'nvm', ok: true, current: 'none', remoteLoaded: false, rows: []})
+        loadTools: async () => tools
     };
 
     const {lastFrame, stdin, unmount} = render(h(App, {
@@ -103,43 +101,6 @@ test('confirms tool uninstall action', async () => {
     unmount();
 });
 
-test('renders nvm action keys', async () => {
-    const loaders = {
-        loadTools: async () => ({kind: 'tools', includeUpdates: false, rows: []}),
-        loadNvm: async () => ({
-            kind: 'nvm',
-            ok: true,
-            current: 'v22.0.0',
-            remoteLoaded: false,
-            rows: [
-                {
-                    version: 'v22.0.0',
-                    status: 'active',
-                    lts: 'Jod',
-                    path: '/home/user/.nvm/versions/node/v22.0.0',
-                    current: true
-                }
-            ]
-        })
-    };
-
-    const {lastFrame, unmount} = render(h(App, {
-        loaders,
-        initialView: 'nvm',
-        resultFile: '',
-        actionFile: '/tmp/unused-action'
-    }));
-
-    await new Promise(resolve => setTimeout(resolve, 20));
-    assert.match(lastFrame(), /Action keys/);
-    assert.match(lastFrame(), /Enter\s+use\/install selected/);
-    assert.match(lastFrame(), /i\s+install version prompt/);
-    assert.match(lastFrame(), /d\/x\s+uninstall selected/);
-    assert.match(lastFrame(), /r\s+load remote versions/);
-    assert.match(lastFrame(), /q\/Esc\s+back/);
-    unmount();
-});
-
 test('shows slash command menu with descriptions after typing slash', async () => {
     const tools = {
         kind: 'tools',
@@ -148,8 +109,7 @@ test('shows slash command menu with descriptions after typing slash', async () =
     };
 
     const loaders = {
-        loadTools: async () => tools,
-        loadNvm: async () => ({kind: 'nvm', ok: true, current: 'none', remoteLoaded: false, rows: []})
+        loadTools: async () => tools
     };
 
     const {lastFrame, stdin, unmount} = render(h(App, {
@@ -162,9 +122,9 @@ test('shows slash command menu with descriptions after typing slash', async () =
     stdin.write('/');
     await new Promise(resolve => setTimeout(resolve, 20));
 
-    assert.match(lastFrame(), /\/nvm/);
+    assert.doesNotMatch(lastFrame(), /\/nvm/);
     assert.match(lastFrame(), /\/updates/);
-    assert.match(lastFrame(), /Open Node versions/);
+    assert.doesNotMatch(lastFrame(), /Open Node versions/);
     assert.match(lastFrame(), /Check latest tool versions/);
     assert.match(lastFrame(), /arrows\s+move command/);
     assert.match(lastFrame(), /Enter\s+run highlighted command/);
@@ -178,8 +138,7 @@ test('shows slash command menu with descriptions after typing slash', async () =
 
 test('backspace on empty slash prompt returns to action keys', async () => {
     const loaders = {
-        loadTools: async () => ({kind: 'tools', includeUpdates: false, rows: []}),
-        loadNvm: async () => ({kind: 'nvm', ok: true, current: 'none', remoteLoaded: false, rows: []})
+        loadTools: async () => ({kind: 'tools', includeUpdates: false, rows: []})
     };
 
     const {lastFrame, stdin, unmount} = render(h(App, {
@@ -191,30 +150,45 @@ test('backspace on empty slash prompt returns to action keys', async () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('/');
     await new Promise(resolve => setTimeout(resolve, 20));
-    assert.match(lastFrame(), /Open Node versions/);
+    assert.match(lastFrame(), /Check latest tool versions/);
 
     stdin.write('\x7f');
     await new Promise(resolve => setTimeout(resolve, 20));
-    assert.doesNotMatch(lastFrame(), /Open Node versions/);
+    assert.doesNotMatch(lastFrame(), /Check latest tool versions/);
     assert.match(lastFrame(), /type \/ for commands/);
     assert.match(lastFrame(), /Enter\s+install\/update selected/);
     unmount();
 });
 
 test('arrow selection in slash menu controls enter command', async () => {
-    const loadToolUpdates = [];
+    let action;
     const loaders = {
-        loadTools: async includeUpdates => {
-            loadToolUpdates.push(Boolean(includeUpdates));
-            return {kind: 'tools', includeUpdates: Boolean(includeUpdates), rows: []};
-        },
-        loadNvm: async () => ({kind: 'nvm', ok: true, current: 'none', remoteLoaded: false, rows: []})
+        loadTools: async () => ({
+            kind: 'tools',
+            includeUpdates: false,
+            rows: [
+                {
+                    id: 'gh',
+                    command: 'gh',
+                    path: '/usr/bin/gh',
+                    current: '2.0.0',
+                    latest: '2.1.0',
+                    status: 'update',
+                    installer: '/tmp/gh.sh',
+                    actionable: true,
+                    uninstallable: false
+                }
+            ]
+        })
     };
 
     const {stdin, unmount} = render(h(App, {
         loaders,
         resultFile: '',
-        actionFile: '/tmp/unused-action'
+        actionFile: '/tmp/unused-action',
+        writeActionFile: async (_file, nextAction) => {
+            action = nextAction;
+        }
     }));
 
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -222,9 +196,16 @@ test('arrow selection in slash menu controls enter command', async () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\x1B[B');
     await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B[B');
+    await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\r');
     await new Promise(resolve => setTimeout(resolve, 30));
 
-    assert.deepEqual(loadToolUpdates, [false, true]);
+    assert.deepEqual(action, {
+        ACTION: 'install_tool',
+        COMMAND: 'gh',
+        INCLUDE_UPDATES: '0',
+        VIEW: 'tools'
+    });
     unmount();
 });

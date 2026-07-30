@@ -2,18 +2,15 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {Box, Text, useApp, useInput, useStdout} from 'ink';
 import {
     HELP_LINES,
-    actionForNvmRow,
     firstActionableTool,
-    firstCurrentNvm,
     moveSelection,
-    nvmAction,
     resolveSlashCommand,
     SLASH_COMMANDS,
     toolAction,
     toolUninstallAction,
     visibleWindowStart
 } from './state.mjs';
-import {loadNvm, loadTools, readResultMessage, writeAction} from './io.mjs';
+import {loadTools, readResultMessage, writeAction} from './io.mjs';
 
 const h = React.createElement;
 
@@ -26,10 +23,7 @@ function statusColor(status) {
             return 'yellow';
         case 'current':
         case 'installed':
-        case 'active':
             return 'green';
-        case 'available':
-            return 'cyan';
         default:
             return undefined;
     }
@@ -69,7 +63,7 @@ function statusCounts(rows) {
     }, {});
 }
 
-function actionKeyLines(view, mode) {
+function actionKeyLines(mode) {
     if (mode === 'slash') {
         return [
             'arrows  move command',
@@ -77,17 +71,6 @@ function actionKeyLines(view, mode) {
             'type  filter commands',
             'Backspace  edit or close',
             'Esc  close command menu'
-        ];
-    }
-
-    if (view === 'nvm') {
-        return [
-            'j/k or arrows  move selection',
-            'Enter  use/install selected',
-            'i  install version prompt',
-            'd/x  uninstall selected',
-            'r  load remote versions',
-            '/  commands · q/Esc  back'
         ];
     }
 
@@ -123,15 +106,13 @@ function slashCommandMatches(filter) {
     });
 }
 
-function WelcomePanel({view, inputMode, width, height, rows, includeUpdates, nvmCurrent, nvmRemote}) {
+function WelcomePanel({inputMode, width, height, rows, includeUpdates}) {
     const username = process.env.USER ?? 'friend';
     const cwd = process.cwd().replace(process.env.HOME ?? '', '~');
     const leftWidth = Math.max(28, Math.min(48, Math.floor(width * 0.28)));
     const counts = statusCounts(rows);
-    const summary = view === 'nvm'
-        ? `${nvmRemote ? 'remote loaded' : 'local only'}`
-        : includeUpdates ? 'remote checked' : 'local only';
-    const actions = actionKeyLines(view, inputMode);
+    const summary = includeUpdates ? 'remote checked' : 'local only';
+    const actions = actionKeyLines(inputMode);
 
     return h(Box, {
         borderStyle: 'single',
@@ -142,10 +123,7 @@ function WelcomePanel({view, inputMode, width, height, rows, includeUpdates, nvm
     },
         h(Box, {width: leftWidth, flexDirection: 'column', alignItems: 'center', paddingX: 1},
             h(Text, {bold: true}, `Welcome back ${username}!`),
-            h(Text, {color: 'gray'}, view === 'nvm'
-                ? `Node ${nvmCurrent}`
-                : `Tools ${rows.length}  updates ${counts.update ?? 0}  missing ${counts.missing ?? 0}`
-            ),
+            h(Text, {color: 'gray'}, `Tools ${rows.length}  updates ${counts.update ?? 0}  missing ${counts.missing ?? 0}`),
             h(Text, {color: 'gray'}, truncate(cwd, Math.max(10, leftWidth - 4)))
         ),
         h(Box, {width: 1, flexDirection: 'column', flexShrink: 0},
@@ -154,10 +132,7 @@ function WelcomePanel({view, inputMode, width, height, rows, includeUpdates, nvm
         h(Box, {flexGrow: 1, flexDirection: 'column', paddingX: 1},
             h(Text, {bold: true, color: 'red'}, 'Action keys'),
             ...actions.map(line => h(Text, {key: line}, line)),
-            h(Text, {color: 'gray'}, view === 'nvm'
-                ? `Status: Node screen · ${summary}`
-                : `Status: Managed tools · ${summary}`
-            )
+            h(Text, {color: 'gray'}, `Status: Managed tools · ${summary}`)
         )
     );
 }
@@ -190,54 +165,15 @@ function ToolRows({rows, selected, width, visibleRows, showRange = true}) {
     );
 }
 
-function NvmRows({rows, selected, width, visibleRows, showRange = true}) {
-    const pathWidth = Math.max(12, width - 44);
-    const start = visibleWindowStart(selected, rows.length, visibleRows);
-    const end = Math.min(start + visibleRows, rows.length);
-    const shownRows = rows.slice(start, end);
-
-    if (rows.length === 0) {
-        return h(Text, {color: 'yellow'}, 'No Node versions were found.');
-    }
-
-    return h(Box, {flexDirection: 'column'},
-        h(Text, {bold: true}, `${' '.padEnd(2)}${'version'.padEnd(14)}${'status'.padEnd(11)}${'lts'.padEnd(13)}path`),
-        ...shownRows.map((row, offset) => {
-            const index = start + offset;
-            const isSelected = index === selected;
-            const marker = isSelected ? '>' : ' ';
-
-            return h(Box, {key: row.version},
-                h(Text, {inverse: isSelected}, `${marker} ${row.version.padEnd(14)}`),
-                h(Text, {inverse: isSelected, color: statusColor(row.status)}, row.status.padEnd(11)),
-                h(Text, {inverse: isSelected, color: row.lts === '-' ? undefined : 'yellow'}, row.lts.padEnd(13)),
-                h(Text, {inverse: isSelected}, truncate(row.path, pathWidth))
-            );
-        }),
-        showRange && rows.length > visibleRows
-            ? h(Text, {color: 'gray'}, `showing ${start + 1}-${end} of ${rows.length}`)
-            : null
-    );
-}
-
-function Prompt({mode, text, view}) {
+function Prompt({mode, text}) {
     if (mode === 'slash') {
         return h(Text, {color: 'cyan'}, `/${text}`);
-    }
-    if (mode === 'nvm-install') {
-        return h(Text, {color: 'cyan'}, `install node [lts/*]: ${text}`);
-    }
-    if (mode === 'nvm-uninstall') {
-        return h(Text, {color: 'yellow'}, `uninstall selected? [y/N] ${text}`);
     }
     if (mode === 'tool-uninstall') {
         return h(Text, {color: 'yellow'}, `uninstall selected command? [y/N] ${text}`);
     }
 
-    return h(Text, {color: 'gray'}, view === 'nvm'
-        ? 'j/k move  Enter use/install  i install  d uninstall  r remote  / command  q back'
-        : 'j/k move  Enter install/update  d uninstall  / command  r local refresh  q quit'
-    );
+    return h(Text, {color: 'gray'}, 'j/k move  Enter install/update  d uninstall  / command  r local refresh  q quit');
 }
 
 function CommandMenu({commands, selected, maxRows}) {
@@ -264,7 +200,7 @@ function CommandMenu({commands, selected, maxRows}) {
     );
 }
 
-function InputBar({mode, text, view}) {
+function InputBar({mode, text}) {
     return h(Box, {
         borderStyle: 'single',
         borderColor: 'gray',
@@ -275,7 +211,7 @@ function InputBar({mode, text, view}) {
         h(Text, {bold: true, color: mode === 'none' ? 'gray' : 'cyan'}, '› '),
         mode === 'none'
             ? h(Text, {color: 'gray'}, 'type / for commands')
-            : h(Prompt, {mode, text, view})
+            : h(Prompt, {mode, text})
     );
 }
 
@@ -314,25 +250,17 @@ function useInitialMessages(resultFile) {
 export function App({
     actionFile = process.env.WELCOME_ACTION_FILE,
     resultFile = process.env.WELCOME_RESULT_FILE,
-    initialView = process.env.WELCOME_INITIAL_VIEW === 'nvm' ? 'nvm' : 'tools',
     initialIncludeUpdates = process.env.WELCOME_INCLUDE_UPDATES === '1',
-    initialNvmRemote = process.env.WELCOME_NVM_REMOTE === '1',
-    loaders = {loadTools, loadNvm},
+    loaders = {loadTools},
     writeActionFile = writeAction
 } = {}) {
     const {exit} = useApp();
     const {stdout} = useStdout();
     const width = stdout?.columns ?? 100;
     const height = stdout?.rows ?? process.stdout.rows ?? 30;
-    const [view, setView] = useState(initialView);
     const [toolRows, setToolRows] = useState([]);
-    const [nvmRows, setNvmRows] = useState([]);
     const [toolSelected, setToolSelected] = useState(0);
-    const [nvmSelected, setNvmSelected] = useState(0);
     const [includeUpdates, setIncludeUpdates] = useState(initialIncludeUpdates);
-    const [nvmRemote, setNvmRemote] = useState(initialNvmRemote);
-    const [nvmCurrent, setNvmCurrent] = useState('none');
-    const [nvmError, setNvmError] = useState('');
     const [busy, setBusy] = useState('');
     const [inputMode, setInputMode] = useState('none');
     const [inputText, setInputText] = useState('');
@@ -373,34 +301,9 @@ export function App({
         }
     }, [appendMessage, includeUpdates, loaders]);
 
-    const refreshNvm = useCallback(async (remote = nvmRemote, message = '') => {
-        setBusy(remote ? 'Loading nvm remote versions...' : 'Refreshing local Node versions...');
-        try {
-            const data = await loaders.loadNvm(remote);
-            setNvmRows(data.rows ?? []);
-            setNvmRemote(Boolean(data.remoteLoaded));
-            setNvmCurrent(data.current ?? 'none');
-            setNvmError(data.error ?? '');
-            setNvmSelected(firstCurrentNvm(data.rows ?? []));
-            if (message) {
-                appendMessage(message);
-            }
-        } catch (error) {
-            appendMessage(error.message, 'error');
-        } finally {
-            setBusy('');
-        }
-    }, [appendMessage, loaders, nvmRemote]);
-
     useEffect(() => {
         refreshTools(initialIncludeUpdates);
     }, []);
-
-    useEffect(() => {
-        if (view === 'nvm' && nvmRows.length === 0 && !busy) {
-            refreshNvm(initialNvmRemote);
-        }
-    }, [view]);
 
     const requestAction = useCallback(async action => {
         await writeActionFile(actionFile, action);
@@ -408,7 +311,6 @@ export function App({
     }, [actionFile, exit, writeActionFile]);
 
     const selectedTool = toolRows[toolSelected];
-    const selectedNvm = nvmRows[nvmSelected];
 
     const submitToolInstall = useCallback(() => {
         if (!selectedTool) {
@@ -436,16 +338,11 @@ export function App({
     }, [appendMessage, selectedTool]);
 
     const handleSlash = useCallback(commandText => {
-        const result = resolveSlashCommand(commandText, view);
+        const result = resolveSlashCommand(commandText);
         appendMessage(`/${commandText.trim().replace(/^\/+/, '') || 'help'}`, 'info', 'you');
 
         switch (result.type) {
-            case 'view':
-                setView(result.view);
-                appendMessage(result.message);
-                break;
             case 'updates':
-                setView('tools');
                 refreshTools(true, 'Latest tool versions loaded.');
                 break;
             case 'install':
@@ -466,7 +363,7 @@ export function App({
                 appendMessage('Command did nothing.', 'warn');
                 break;
         }
-    }, [appendMessage, exit, refreshTools, submitToolInstall, view]);
+    }, [appendMessage, exit, refreshTools, submitToolInstall]);
 
     const handleInputSubmit = useCallback(() => {
         if (inputMode === 'slash') {
@@ -478,27 +375,6 @@ export function App({
             return;
         }
 
-        if (inputMode === 'nvm-install') {
-            const version = inputText.trim() || 'lts/*';
-            setInputMode('none');
-            setInputText('');
-            setCommandSelected(0);
-            requestAction(nvmAction('nvm_install_use', version, nvmRemote));
-            return;
-        }
-
-        if (inputMode === 'nvm-uninstall') {
-            const answer = inputText.trim().toLowerCase();
-            setInputMode('none');
-            setInputText('');
-            setCommandSelected(0);
-            if (answer === 'y' || answer === 'yes') {
-                requestAction(nvmAction('nvm_uninstall', selectedNvm.version, nvmRemote));
-            } else {
-                appendMessage('Skipped uninstall.');
-            }
-            return;
-        }
 
         if (inputMode === 'tool-uninstall') {
             const answer = inputText.trim().toLowerCase();
@@ -515,7 +391,7 @@ export function App({
                 appendMessage('Skipped uninstall.');
             }
         }
-    }, [appendMessage, commandSelected, handleSlash, includeUpdates, inputMode, inputText, nvmRemote, requestAction, selectedNvm, selectedTool, slashCommands]);
+    }, [appendMessage, commandSelected, handleSlash, includeUpdates, inputMode, inputText, requestAction, selectedTool, slashCommands]);
 
     useInput((input, key) => {
         if (busy) {
@@ -566,72 +442,32 @@ export function App({
         }
 
         if (key.upArrow || input === 'k' || input === 'K') {
-            if (view === 'nvm') {
-                setNvmSelected(current => moveSelection(current, nvmRows.length, -1));
-            } else {
-                setToolSelected(current => moveSelection(current, toolRows.length, -1));
-            }
+            setToolSelected(current => moveSelection(current, toolRows.length, -1));
             return;
         }
 
         if (key.downArrow || input === 'j' || input === 'J') {
-            if (view === 'nvm') {
-                setNvmSelected(current => moveSelection(current, nvmRows.length, 1));
-            } else {
-                setToolSelected(current => moveSelection(current, toolRows.length, 1));
-            }
+            setToolSelected(current => moveSelection(current, toolRows.length, 1));
             return;
         }
 
         if (key.return) {
-            if (view === 'nvm') {
-                const action = actionForNvmRow(selectedNvm, nvmRemote);
-                if (action) {
-                    requestAction(action);
-                } else {
-                    appendMessage('No Node version is selected.', 'warn');
-                }
-            } else {
-                submitToolInstall();
-            }
+            submitToolInstall();
             return;
         }
 
         if (input === 'r' || input === 'R') {
-            if (view === 'nvm') {
-                refreshNvm(true, 'Remote Node versions loaded.');
-            } else {
-                refreshTools(false, 'Local tool status refreshed.');
-            }
+            refreshTools(false, 'Local tool status refreshed.');
             return;
         }
 
-        if (view === 'nvm' && (input === 'i' || input === 'I')) {
-            setInputMode('nvm-install');
-            setInputText('');
-            return;
-        }
-
-        if (view === 'nvm' && (input === 'd' || input === 'D' || input === 'x' || input === 'X')) {
-            if (!selectedNvm || selectedNvm.status === 'available') {
-                appendMessage('Selected Node version is not installed.', 'warn');
-                return;
-            }
-            setInputMode('nvm-uninstall');
-            setInputText('');
-            return;
-        }
-
-        if (view === 'tools' && (input === 'd' || input === 'D' || input === 'x' || input === 'X')) {
+        if (input === 'd' || input === 'D' || input === 'x' || input === 'X') {
             beginToolUninstall();
             return;
         }
 
         if (input === 'q' || input === 'Q' || key.escape) {
-            if (view === 'nvm') {
-                setView('tools');
-                appendMessage('Back to managed tools.');
-            } else if (includeUpdates) {
+            if (includeUpdates) {
                 refreshTools(false, 'Back to local welcome.');
             } else {
                 exit();
@@ -648,27 +484,19 @@ export function App({
         () => transcriptLimit > 0 ? messages.slice(-transcriptLimit) : [],
         [messages, transcriptLimit]
     );
-    const extraStatusLines = (nvmError && view === 'nvm' ? 1 : 0) + (busy ? 1 : 0);
+    const extraStatusLines = busy ? 1 : 0;
     const visibleRows = Math.max(1, mainHeight - transcript.length - extraStatusLines - 2);
 
     return h(Box, {flexDirection: 'column', height, width},
         h(WelcomePanel, {
-            view,
             inputMode,
             width,
             height: headerHeight,
-            rows: view === 'nvm' ? nvmRows : toolRows,
-            includeUpdates,
-            nvmCurrent,
-            nvmRemote
+            rows: toolRows,
+            includeUpdates
         }),
         h(Box, {height: mainHeight, flexDirection: 'column', flexGrow: 1},
-            view === 'nvm'
-                ? h(NvmRows, {rows: nvmRows, selected: nvmSelected, width, visibleRows, showRange: !commandMenuVisible})
-                : h(ToolRows, {rows: toolRows, selected: toolSelected, width, visibleRows, showRange: !commandMenuVisible}),
-            nvmError && view === 'nvm'
-                ? h(Text, {color: 'yellow'}, nvmError)
-                : null,
+            h(ToolRows, {rows: toolRows, selected: toolSelected, width, visibleRows, showRange: !commandMenuVisible}),
             busy
                 ? h(Text, {color: 'gray'}, busy)
                 : null,
@@ -679,6 +507,6 @@ export function App({
         inputMode === 'slash'
             ? h(CommandMenu, {commands: slashCommands, selected: commandSelected, maxRows: commandMenuMaxRows})
             : null,
-        h(InputBar, {mode: inputMode, text: inputText, view})
+        h(InputBar, {mode: inputMode, text: inputText})
     );
 }

@@ -59,8 +59,8 @@ welcome_valid_token() {
     [[ "$1" =~ ^[A-Za-z0-9_.-]+$ ]]
 }
 
-welcome_valid_nvm_version() {
-    [[ "$1" =~ ^[A-Za-z0-9._/+*-]+$ ]]
+welcome_valid_node_version() {
+    [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
 welcome_run_installer_by_index() {
@@ -68,6 +68,11 @@ welcome_run_installer_by_index() {
     local code_running_status rc command_name
 
     command_name="${COMMANDS[$index]}"
+    if [ "$command_name" = "node" ]; then
+        welcome_update_node "${CURRENTS[$index]}" "${LATESTS[$index]}"
+        return $?
+    fi
+
     if [ ! -f "$installer" ]; then
         printf 'No installer found: %s\n' "$installer"
         return 1
@@ -298,36 +303,105 @@ welcome_load_nvm() {
     command -v nvm >/dev/null 2>&1
 }
 
-welcome_run_nvm_action() {
-    local action="$1" version="$2"
+welcome_update_node() {
+    local current="${1#v}" latest="${2#v}"
+    local major target installed installed_output installed_versions default_version current_after rc cleanup_rc=0
 
-    welcome_valid_nvm_version "$version" || {
-        printf 'Invalid Node version: %s\n' "$version"
+    welcome_valid_node_version "$current" || {
+        printf 'Invalid current Node version: %s\n' "$1"
+        return 2
+    }
+    welcome_valid_node_version "$latest" || {
+        printf 'Invalid latest Node version: %s\n' "$2"
         return 2
     }
 
-    welcome_load_nvm || return 1
+    major="${current%%.*}"
+    if [ "${latest%%.*}" != "$major" ]; then
+        printf 'Refusing to change Node major from %s to %s.\n' "$major" "${latest%%.*}"
+        return 2
+    fi
+    if [ "$current" = "$latest" ]; then
+        printf 'Node %s is already current.\n' "$current"
+        return 0
+    fi
+    if ! node_version_is_newer "$current" "$latest"; then
+        printf 'Refusing to downgrade Node from %s to %s.\n' "$current" "$latest"
+        return 2
+    fi
 
-    case "$action" in
-        nvm_use)
-            printf 'Using Node %s...\n' "$version"
-            nvm use "$version"
-            ;;
-        nvm_install_use)
-            printf 'Installing Node %s...\n' "$version"
-            nvm install "$version" || return $?
-            printf 'Using Node %s...\n' "$version"
-            nvm use "$version"
-            ;;
-        nvm_uninstall)
-            printf 'Uninstalling Node %s...\n' "$version"
-            nvm uninstall "$version"
-            ;;
-        *)
-            printf 'Unknown nvm action: %s\n' "$action"
-            return 2
-            ;;
-    esac
+    welcome_load_nvm || return 1
+    target="v$latest"
+
+    printf 'Installing Node %s with nvm...\n' "$target"
+    if nvm install "$target"; then
+        rc=0
+    else
+        rc=$?
+        printf 'Failed to install Node %s.\n' "$target"
+        return "$rc"
+    fi
+
+    printf 'Using Node %s...\n' "$target"
+    if nvm use "$target"; then
+        rc=0
+    else
+        rc=$?
+        printf 'Failed to activate Node %s; older versions were kept.\n' "$target"
+        return "$rc"
+    fi
+    hash -r 2>/dev/null || true
+
+    current_after=$(nvm current 2>/dev/null) || current_after=""
+    if [ "$current_after" != "$target" ] || [ "$(node --version 2>/dev/null)" != "$target" ]; then
+        printf 'Node %s could not be verified; older versions were kept.\n' "$target"
+        return 1
+    fi
+
+    default_version=$(nvm version default 2>/dev/null || true)
+    if [[ "$default_version" =~ ^v?${major}\.[0-9]+\.[0-9]+$ ]] \
+        && [ "${default_version#v}" != "$latest" ]; then
+        printf 'Updating the default Node alias to major %s...\n' "$major"
+        if ! nvm alias default "$major"; then
+            printf 'Could not preserve the default alias; older versions were kept.\n'
+            return 1
+        fi
+    fi
+
+    if ! installed_output=$(nvm ls "$major" --no-colors 2>/dev/null); then
+        printf 'Could not list installed Node %s.x versions; older versions were kept.\n' "$major"
+        return 1
+    fi
+    installed_versions=$(printf '%s\n' "$installed_output" \
+        | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' \
+        | sort -Vu) || true
+    if ! grep -Fxq "$target" <<<"$installed_versions"; then
+        printf 'Could not verify Node %s in the installed-version list; older versions were kept.\n' "$target"
+        return 1
+    fi
+
+    while IFS= read -r installed; do
+        [ -n "$installed" ] || continue
+        [[ "$installed" =~ ^v${major}\.[0-9]+\.[0-9]+$ ]] || continue
+        [ "$installed" != "$target" ] || continue
+        node_version_is_newer "${installed#v}" "$latest" || continue
+
+        current_after=$(nvm current 2>/dev/null) || current_after=""
+        if [ "$current_after" != "$target" ]; then
+            printf 'Active Node changed unexpectedly; remaining older versions were kept.\n'
+            return 1
+        fi
+
+        printf 'Uninstalling superseded Node %s...\n' "$installed"
+        nvm uninstall "$installed" || cleanup_rc=1
+    done <<<"$installed_versions"
+
+    if [ "$cleanup_rc" -ne 0 ]; then
+        printf 'Node %s is active, but at least one older %s.x version could not be removed.\n' "$target" "$major"
+        return "$cleanup_rc"
+    fi
+
+    printf 'Updated Node to %s and removed older %s.x installations.\n' "$target" "$major"
 }
 
 welcome_record_result() {
@@ -348,7 +422,7 @@ welcome_record_result() {
 
 welcome_execute_action_file() {
     local action_file="$1" result_file="$2"
-    local action command_name version include_updates output rc
+    local action command_name include_updates output action_output_file rc
 
     action=$(welcome_action_value ACTION "$action_file")
     include_updates=$(welcome_action_value INCLUDE_UPDATES "$action_file")
@@ -357,8 +431,22 @@ welcome_execute_action_file() {
     case "$action" in
         install_tool)
             command_name=$(welcome_action_value COMMAND "$action_file")
-            output=$(welcome_run_tool_installer "$command_name" "$include_updates" 2>&1)
-            rc=$?
+            if [ "$command_name" = "node" ]; then
+                action_output_file="${result_file}.action-output"
+                if welcome_run_tool_installer "$command_name" "$include_updates" >"$action_output_file" 2>&1; then
+                    rc=0
+                else
+                    rc=$?
+                fi
+                output=""
+                if [ -s "$action_output_file" ]; then
+                    IFS= read -r -d '' output <"$action_output_file" || true
+                fi
+                rm -f -- "$action_output_file"
+            else
+                output=$(welcome_run_tool_installer "$command_name" "$include_updates" 2>&1)
+                rc=$?
+            fi
             welcome_record_result "$result_file" "Tool action: $command_name" "$rc" "$output"
             return 0
             ;;
@@ -367,13 +455,6 @@ welcome_execute_action_file() {
             output=$(welcome_run_tool_uninstaller "$command_name" 2>&1)
             rc=$?
             welcome_record_result "$result_file" "Tool uninstall: $command_name" "$rc" "$output"
-            return 0
-            ;;
-        nvm_use|nvm_install_use|nvm_uninstall)
-            version=$(welcome_action_value VERSION "$action_file")
-            output=$(welcome_run_nvm_action "$action" "$version" 2>&1)
-            rc=$?
-            welcome_record_result "$result_file" "Node action: $version" "$rc" "$output"
             return 0
             ;;
         quit|"")
@@ -388,8 +469,8 @@ welcome_execute_action_file() {
 
 welcome_main() {
     local session_dir action_file result_file update_cache_dir WELCOME_UPDATE_CACHE_DIR
-    local view="tools" include_updates=0 nvm_remote=0
-    local action next_view next_updates next_nvm_remote
+    local include_updates=0
+    local action next_updates
     local rc=0
 
     welcome_require_runtime || return 0
@@ -404,9 +485,7 @@ welcome_main() {
         rm -f "$action_file"
         WELCOME_ACTION_FILE="$action_file" \
             WELCOME_RESULT_FILE="$result_file" \
-            WELCOME_INITIAL_VIEW="$view" \
             WELCOME_INCLUDE_UPDATES="$include_updates" \
-            WELCOME_NVM_REMOTE="$nvm_remote" \
             WELCOME_DOTFILES_DIR="$WELCOME_DOTFILES_DIR" \
             WELCOME_UPDATE_CACHE_DIR="$update_cache_dir" \
             node "$WELCOME_APP" || rc=$?
@@ -416,29 +495,10 @@ welcome_main() {
         action=$(welcome_action_value ACTION "$action_file")
         [ "$action" != "quit" ] || break
 
-        next_view=$(welcome_action_value VIEW "$action_file")
         next_updates=$(welcome_action_value INCLUDE_UPDATES "$action_file")
-        next_nvm_remote=$(welcome_action_value NVM_REMOTE "$action_file")
 
         welcome_execute_action_file "$action_file" "$result_file" || break
-
-        case "$action" in
-            install_tool|uninstall_tool)
-                view="tools"
-                [ "$next_updates" = "1" ] && include_updates=1 || include_updates=0
-                nvm_remote=0
-                ;;
-            nvm_use|nvm_install_use|nvm_uninstall)
-                view="nvm"
-                include_updates=0
-                nvm_remote=0
-                ;;
-            *)
-                [ "$next_view" = "nvm" ] && view="nvm" || view="tools"
-                [ "$next_updates" = "1" ] && include_updates=1 || include_updates=0
-                [ "$next_nvm_remote" = "1" ] && nvm_remote=1 || nvm_remote=0
-                ;;
-        esac
+        [ "$next_updates" = "1" ] && include_updates=1 || include_updates=0
     done
 
     rm -rf "$session_dir"

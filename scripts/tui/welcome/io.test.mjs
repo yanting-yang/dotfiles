@@ -10,11 +10,11 @@ test('writes KEY=VALUE action files without sourcing semantics', async () => {
     const actionFile = path.join(dir, 'action.env');
 
     await writeAction(actionFile, {
-        ACTION: 'nvm_install_use',
-        VERSION: 'lts/*',
+        ACTION: 'install_tool',
+        COMMAND: 'gh',
         NOTE: 'hello\nworld'
     });
 
-    assert.equal(await readFile(actionFile, 'utf8'), 'ACTION=nvm_install_use\nVERSION=lts/*\nNOTE=hello world\n');
+    assert.equal(await readFile(actionFile, 'utf8'), 'ACTION=install_tool\nCOMMAND=gh\nNOTE=hello world\n');
     await rm(dir, {recursive: true, force: true});
 });

@@ -35,10 +35,6 @@ export function loadTools(includeUpdates = false) {
     return execJson(['tools', includeUpdates ? '--updates' : '--local']);
 }
 
-export function loadNvm(includeRemote = false) {
-    return execJson(['nvm', includeRemote ? '--remote' : '--local']);
-}
-
 export async function readResultMessage(resultFile) {
     if (!resultFile || !existsSync(resultFile)) {
         return '';

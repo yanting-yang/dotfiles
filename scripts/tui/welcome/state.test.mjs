@@ -1,8 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    actionForNvmRow,
-    firstCurrentNvm,
     firstActionableTool,
     moveSelection,
     normalizeSlashCommand,
@@ -23,12 +21,6 @@ test('finds first actionable tool', () => {
     assert.equal(firstActionableTool([{actionable: false}]), 0);
 });
 
-test('finds current Node version', () => {
-    assert.equal(firstCurrentNvm([{current: false}, {current: true}]), 1);
-    assert.equal(firstCurrentNvm([{status: 'installed'}, {status: 'active'}]), 1);
-    assert.equal(firstCurrentNvm([{status: 'installed'}]), 0);
-});
-
 test('calculates selected row viewport start', () => {
     assert.equal(visibleWindowStart(0, 100, 10), 0);
     assert.equal(visibleWindowStart(50, 100, 10), 45);
@@ -38,19 +30,15 @@ test('calculates selected row viewport start', () => {
 
 test('normalizes and resolves slash commands', () => {
     assert.equal(normalizeSlashCommand('/updates now'), 'updates');
-    assert.deepEqual(resolveSlashCommand('/nvm', 'tools'), {
-        type: 'view',
-        view: 'nvm',
-        message: 'Opening Node versions.'
-    });
-    assert.equal(resolveSlashCommand('/node', 'tools').type, 'message');
-    assert.equal(resolveSlashCommand('/tools', 'nvm').type, 'message');
-    assert.equal(resolveSlashCommand('/local', 'tools').type, 'message');
-    assert.equal(resolveSlashCommand('/all', 'tools').type, 'message');
-    assert.equal(resolveSlashCommand('/q', 'tools').type, 'message');
-    assert.equal(resolveSlashCommand('/h', 'tools').type, 'message');
-    assert.equal(resolveSlashCommand('/?', 'tools').type, 'message');
-    assert.equal(resolveSlashCommand('/wat', 'tools').type, 'message');
+    assert.equal(resolveSlashCommand('/nvm').type, 'message');
+    assert.equal(resolveSlashCommand('/node').type, 'message');
+    assert.equal(resolveSlashCommand('/tools').type, 'message');
+    assert.equal(resolveSlashCommand('/local').type, 'message');
+    assert.equal(resolveSlashCommand('/all').type, 'message');
+    assert.equal(resolveSlashCommand('/q').type, 'message');
+    assert.equal(resolveSlashCommand('/h').type, 'message');
+    assert.equal(resolveSlashCommand('/?').type, 'message');
+    assert.equal(resolveSlashCommand('/wat').type, 'message');
 });
 
 test('builds action file payloads', () => {
@@ -65,11 +53,5 @@ test('builds action file payloads', () => {
         COMMAND: 'gh',
         INCLUDE_UPDATES: '0',
         VIEW: 'tools'
-    });
-    assert.deepEqual(actionForNvmRow({version: 'v24.0.0', status: 'available'}, true), {
-        ACTION: 'nvm_install_use',
-        VERSION: 'v24.0.0',
-        VIEW: 'nvm',
-        NVM_REMOTE: '1'
     });
 });

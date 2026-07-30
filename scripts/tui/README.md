@@ -10,9 +10,8 @@ source scripts/tui/nvm.sh
 run_nvm_tui
 ```
 
-Source it when you want `nvm use` to persist in the current shell.
-From the welcome TUI, open it with `/nvm` or `/node`.
-If run directly, its back action opens the first-level welcome TUI.
+Source it when you want `nvm use` to persist in the current shell. If run directly,
+its back action opens the welcome TUI.
 
 Controls:
 

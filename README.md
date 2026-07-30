@@ -50,22 +50,21 @@ source ./welcome.sh
 
 Useful controls:
 
-- `j/k` or arrows: move selection in either level
+- `j/k` or arrows: move the selected tool
 - `/`: open the bottom command menu with command descriptions; arrows move the highlighted command, `Enter` runs it, and Backspace on an empty slash prompt returns to action keys
-- `/nvm`: open Node versions
-- `/updates` or `/check`: check remote versions for managed tools
+- `/updates` or `/check`: check remote versions for managed tools; Node is checked through nvm against the latest release of its active major
 - `/install` or `/update`: install or update the selected actionable tool
 - `/help`: show slash command help in the transcript
-- Tools level: `Enter` installs or updates the selected tool, `d`/`x` uninstalls the selected managed tool, `r` refreshes local tool status, and `q`/`Esc` returns to local status or exits.
-- NVM level: `Enter` uses or installs the selected Node version, `i` opens an install prompt, `d`/`x` uninstalls the selected installed version, `r` loads remote versions, and `q`/`Esc` returns to tools.
+- `Enter` installs or updates the selected tool, `d`/`x` uninstalls the selected managed tool, `r` refreshes local tool status, and `q`/`Esc` returns to local status or exits
 - `/quit` or `/exit`: exit from the slash command menu
 
-NVM actions are applied through the `welcome.sh` Bash bridge so `nvm use` affects the
-current shell.
+Node appears in the normal tool list. Updating it installs and activates the latest
+release in the active major through nvm, then removes superseded installations from
+that major while preserving installations from other majors.
 
-The intentionally supported slash commands are `/nvm`, `/updates`, `/check`,
-`/install`, `/update`, `/help`, `/quit`, and `/exit`. Removed aliases such as
-`/node`, `/tools`, `/local`, and `/all` should remain unavailable.
+The intentionally supported slash commands are `/updates`, `/check`, `/install`,
+`/update`, `/help`, `/quit`, and `/exit`. Removed commands and aliases such as
+`/nvm`, `/node`, `/tools`, `/local`, and `/all` should remain unavailable.
 
 ## Layout
 
@@ -75,7 +74,7 @@ The intentionally supported slash commands are `/nvm`, `/updates`, `/check`,
 - `scripts/lib/`: shared Bash helpers for installers, status checks, and terminal utilities.
 - `scripts/install/`: explicit installers for managed tools.
 - `scripts/tui/welcome/`: Ink welcome app, slash command metadata, JSON status exporter, and tests.
-- `scripts/tui/nvm.sh`: legacy/sourceable Bash NVM TUI helper used by the exporter.
+- `scripts/tui/nvm.sh`: standalone legacy/sourceable Bash NVM TUI helper.
 
 ## Development
 
