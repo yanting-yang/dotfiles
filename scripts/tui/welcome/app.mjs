@@ -2,11 +2,12 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {Box, Text, useApp, useInput, useStdout} from 'ink';
 import {
     HELP_LINES,
-    firstActionableTool,
+    firstToolWithAction,
     moveSelection,
     resolveSlashCommand,
     SLASH_COMMANDS,
     toolAction,
+    toolActionOptions,
     toolUninstallAction,
     visibleWindowStart
 } from './state.mjs';
@@ -74,11 +75,26 @@ function actionKeyRows(mode) {
         ];
     }
 
+    if (mode === 'tool-action') {
+        return [
+            {key: 'arrows', description: 'move action'},
+            {key: 'Enter', description: 'run highlighted action'},
+            {key: 'Backspace', description: 'close action menu'},
+            {key: 'Esc', description: 'close action menu'}
+        ];
+    }
+
+    if (mode === 'tool-uninstall') {
+        return [
+            {key: 'y + Enter', description: 'confirm uninstall'},
+            {key: 'Enter', description: 'cancel uninstall'},
+            {key: 'Esc', description: 'cancel uninstall'}
+        ];
+    }
+
     return [
         {key: 'arrows', description: 'move selection'},
-        {key: 'Enter', description: 'install/update selected'},
-        {key: 'd/x', description: 'uninstall selected'},
-        {key: 'r', description: 'refresh local status'},
+        {key: 'Enter', description: 'choose selected action'},
         {key: '/', description: 'commands'}
     ];
 }
@@ -169,15 +185,18 @@ function ToolRows({rows, selected, width, visibleRows, showRange = true}) {
     );
 }
 
-function Prompt({mode, text}) {
+function Prompt({mode, text, command}) {
     if (mode === 'slash') {
         return h(Text, {color: 'cyan'}, `/${text}`);
+    }
+    if (mode === 'tool-action') {
+        return h(Text, {color: 'cyan'}, `choose action for ${command ?? 'selected tool'}`);
     }
     if (mode === 'tool-uninstall') {
         return h(Text, {color: 'yellow'}, `uninstall selected command? [y/N] ${text}`);
     }
 
-    return h(Text, {color: 'gray'}, 'arrows move  Enter install/update  d uninstall  / command  r local refresh');
+    return h(Text, {color: 'gray'}, 'arrows move  Enter actions  / commands');
 }
 
 function CommandMenu({commands, selected, maxRows}) {
@@ -204,7 +223,26 @@ function CommandMenu({commands, selected, maxRows}) {
     );
 }
 
-function InputBar({mode, text}) {
+function ToolActionMenu({actions, selected, maxRows}) {
+    const start = visibleWindowStart(selected, actions.length, maxRows);
+    const end = Math.min(start + maxRows, actions.length);
+    const shown = actions.slice(start, end);
+
+    return h(Box, {flexDirection: 'column', flexShrink: 0},
+        ...shown.map((action, offset) => {
+            const index = start + offset;
+            const isSelected = index === selected;
+
+            return h(Text, {
+                key: action.type,
+                inverse: isSelected,
+                color: isSelected ? 'cyan' : 'gray'
+            }, action.label);
+        })
+    );
+}
+
+function InputBar({mode, text, command}) {
     return h(Box, {
         borderStyle: 'single',
         borderColor: 'gray',
@@ -215,7 +253,7 @@ function InputBar({mode, text}) {
         h(Text, {bold: true, color: mode === 'none' ? 'gray' : 'cyan'}, '› '),
         mode === 'none'
             ? h(Text, {color: 'gray'}, 'type / for commands')
-            : h(Prompt, {mode, text})
+            : h(Prompt, {mode, text, command})
     );
 }
 
@@ -269,13 +307,21 @@ export function App({
     const [inputMode, setInputMode] = useState('none');
     const [inputText, setInputText] = useState('');
     const [commandSelected, setCommandSelected] = useState(0);
+    const [toolActionSelected, setToolActionSelected] = useState(0);
     const [messages, setMessages] = useInitialMessages(resultFile);
     const headerHeight = height >= 16 ? 10 : Math.max(7, height - 6);
-    const commandMenuVisible = inputMode === 'slash';
-    const commandMenuMaxRows = commandMenuVisible
-        ? Math.max(1, Math.min(SLASH_COMMANDS.length, height - headerHeight - 6))
-        : 0;
+    const selectedTool = toolRows[toolSelected];
+    const selectedToolActions = useMemo(() => toolActionOptions(selectedTool), [selectedTool]);
     const slashCommands = useMemo(() => slashCommandMatches(inputText), [inputText]);
+    const commandMenuVisible = inputMode === 'slash';
+    const toolActionMenuVisible = inputMode === 'tool-action';
+    const menuVisible = commandMenuVisible || toolActionMenuVisible;
+    const menuItemCount = commandMenuVisible
+        ? slashCommands.length
+        : selectedToolActions.length;
+    const menuMaxRows = menuVisible
+        ? Math.max(1, Math.min(menuItemCount, height - headerHeight - 6))
+        : 0;
 
     const appendMessage = useCallback((text, tone = 'info', role = 'welcome') => {
         setMessages(current => [...current.slice(-7), {role, tone, text}]);
@@ -288,13 +334,20 @@ export function App({
         );
     }, [slashCommands.length]);
 
+    useEffect(() => {
+        setToolActionSelected(current => selectedToolActions.length === 0
+            ? 0
+            : Math.min(current, selectedToolActions.length - 1)
+        );
+    }, [selectedToolActions.length]);
+
     const refreshTools = useCallback(async (updates = includeUpdates, message = '') => {
         setBusy(updates ? 'Checking latest tool versions...' : 'Refreshing local tool status...');
         try {
             const data = await loaders.loadTools(updates);
             setToolRows(data.rows ?? []);
             setIncludeUpdates(Boolean(data.includeUpdates));
-            setToolSelected(firstActionableTool(data.rows ?? []));
+            setToolSelected(firstToolWithAction(data.rows ?? []));
             if (message) {
                 appendMessage(message);
             }
@@ -314,32 +367,19 @@ export function App({
         exit();
     }, [actionFile, exit, writeActionFile]);
 
-    const selectedTool = toolRows[toolSelected];
-
-    const submitToolInstall = useCallback(() => {
+    const openToolActionMenu = useCallback(() => {
         if (!selectedTool) {
             appendMessage('No managed tool is selected.', 'warn');
             return;
         }
-        if (!selectedTool.actionable) {
-            appendMessage(`${selectedTool.command} has no install action right now.`, 'warn');
+        if (selectedToolActions.length === 0) {
+            appendMessage(`${selectedTool.command} has no available actions.`, 'warn');
             return;
         }
-        requestAction(toolAction(selectedTool, includeUpdates));
-    }, [appendMessage, includeUpdates, requestAction, selectedTool]);
-
-    const beginToolUninstall = useCallback(() => {
-        if (!selectedTool) {
-            appendMessage('No managed tool is selected.', 'warn');
-            return;
-        }
-        if (!selectedTool.uninstallable) {
-            appendMessage(`${selectedTool.command} has no uninstall action right now.`, 'warn');
-            return;
-        }
-        setInputMode('tool-uninstall');
+        setInputMode('tool-action');
         setInputText('');
-    }, [appendMessage, selectedTool]);
+        setToolActionSelected(0);
+    }, [appendMessage, selectedTool, selectedToolActions.length]);
 
     const handleSlash = useCallback(commandText => {
         const result = resolveSlashCommand(commandText);
@@ -376,6 +416,29 @@ export function App({
             return;
         }
 
+        if (inputMode === 'tool-action') {
+            const action = selectedToolActions[toolActionSelected];
+
+            if (!selectedTool || !action) {
+                setInputMode('none');
+                setInputText('');
+                setToolActionSelected(0);
+                appendMessage('No managed tool action is selected.', 'warn');
+                return;
+            }
+
+            setToolActionSelected(0);
+            if (action.type === 'uninstall') {
+                setInputMode('tool-uninstall');
+                setInputText('');
+                return;
+            }
+
+            setInputMode('none');
+            setInputText('');
+            requestAction(toolAction(selectedTool, includeUpdates));
+            return;
+        }
 
         if (inputMode === 'tool-uninstall') {
             const answer = inputText.trim().toLowerCase();
@@ -392,7 +455,7 @@ export function App({
                 appendMessage('Skipped uninstall.');
             }
         }
-    }, [appendMessage, commandSelected, handleSlash, includeUpdates, inputMode, inputText, requestAction, selectedTool, slashCommands]);
+    }, [appendMessage, commandSelected, handleSlash, includeUpdates, inputMode, inputText, requestAction, selectedTool, selectedToolActions, slashCommands, toolActionSelected]);
 
     useInput((input, key) => {
         if (busy) {
@@ -404,6 +467,7 @@ export function App({
                 setInputMode('none');
                 setInputText('');
                 setCommandSelected(0);
+                setToolActionSelected(0);
                 return;
             }
             if (inputMode === 'slash' && key.upArrow) {
@@ -414,11 +478,25 @@ export function App({
                 setCommandSelected(current => moveSelection(current, slashCommands.length, 1));
                 return;
             }
+            if (inputMode === 'tool-action' && key.upArrow) {
+                setToolActionSelected(current => moveSelection(current, selectedToolActions.length, -1));
+                return;
+            }
+            if (inputMode === 'tool-action' && key.downArrow) {
+                setToolActionSelected(current => moveSelection(current, selectedToolActions.length, 1));
+                return;
+            }
             if (key.return) {
                 handleInputSubmit();
                 return;
             }
             if (key.backspace || key.delete) {
+                if (inputMode === 'tool-action') {
+                    setInputMode('none');
+                    setInputText('');
+                    setToolActionSelected(0);
+                    return;
+                }
                 if (inputMode === 'slash' && inputText.length === 0) {
                     setInputMode('none');
                     setCommandSelected(0);
@@ -426,6 +504,9 @@ export function App({
                 }
                 setInputText(current => current.slice(0, -1));
                 setCommandSelected(0);
+                return;
+            }
+            if (inputMode === 'tool-action') {
                 return;
             }
             if (input && !key.ctrl && !key.meta) {
@@ -453,24 +534,14 @@ export function App({
         }
 
         if (key.return) {
-            submitToolInstall();
-            return;
-        }
-
-        if (input === 'r' || input === 'R') {
-            refreshTools(false, 'Local tool status refreshed.');
-            return;
-        }
-
-        if (input === 'd' || input === 'D' || input === 'x' || input === 'X') {
-            beginToolUninstall();
+            openToolActionMenu();
             return;
         }
     });
 
-    const commandMenuHeight = commandMenuVisible ? commandMenuMaxRows : 0;
-    const mainHeight = Math.max(3, height - headerHeight - commandMenuHeight - 3);
-    const transcriptLimit = commandMenuVisible
+    const menuHeight = menuVisible ? menuMaxRows : 0;
+    const mainHeight = Math.max(3, height - headerHeight - menuHeight - 3);
+    const transcriptLimit = menuVisible
         ? 0
         : Math.max(1, Math.min(6, Math.floor(mainHeight / 3)));
     const transcript = useMemo(
@@ -489,7 +560,7 @@ export function App({
             includeUpdates
         }),
         h(Box, {height: mainHeight, flexDirection: 'column', flexGrow: 1},
-            h(ToolRows, {rows: toolRows, selected: toolSelected, width, visibleRows, showRange: !commandMenuVisible}),
+            h(ToolRows, {rows: toolRows, selected: toolSelected, width, visibleRows, showRange: !menuVisible}),
             busy
                 ? h(Text, {color: 'gray'}, busy)
                 : null,
@@ -497,9 +568,11 @@ export function App({
                 ...transcript.map((entry, index) => h(Message, {key: `${entry.role}-${index}-${entry.text}`, entry}))
             )
         ),
-        inputMode === 'slash'
-            ? h(CommandMenu, {commands: slashCommands, selected: commandSelected, maxRows: commandMenuMaxRows})
-            : null,
-        h(InputBar, {mode: inputMode, text: inputText})
+        commandMenuVisible
+            ? h(CommandMenu, {commands: slashCommands, selected: commandSelected, maxRows: menuMaxRows})
+            : toolActionMenuVisible
+                ? h(ToolActionMenu, {actions: selectedToolActions, selected: toolActionSelected, maxRows: menuMaxRows})
+                : null,
+        h(InputBar, {mode: inputMode, text: inputText, command: selectedTool?.command})
     );
 }

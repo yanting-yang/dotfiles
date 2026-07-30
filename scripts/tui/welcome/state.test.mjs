@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    firstActionableTool,
+    firstToolWithAction,
     moveSelection,
     normalizeSlashCommand,
     resolveSlashCommand,
     SLASH_COMMANDS,
     toolAction,
+    toolActionOptions,
     toolUninstallAction,
     visibleWindowStart
 } from './state.mjs';
@@ -17,9 +18,12 @@ test('selection wraps around row counts', () => {
     assert.equal(moveSelection(0, 0, 1), 0);
 });
 
-test('finds first actionable tool', () => {
-    assert.equal(firstActionableTool([{actionable: false}, {actionable: true}]), 1);
-    assert.equal(firstActionableTool([{actionable: false}]), 0);
+test('finds first tool with an available action', () => {
+    assert.equal(firstToolWithAction([
+        {actionable: false, uninstallable: false},
+        {actionable: false, uninstallable: true}
+    ]), 1);
+    assert.equal(firstToolWithAction([{actionable: false, uninstallable: false}]), 0);
 });
 
 test('calculates selected row viewport start', () => {
@@ -52,6 +56,37 @@ test('normalizes and resolves slash commands', () => {
     assert.equal(resolveSlashCommand('/h').type, 'message');
     assert.equal(resolveSlashCommand('/?').type, 'message');
     assert.equal(resolveSlashCommand('/wat').type, 'message');
+});
+
+test('builds only available tool action options', () => {
+    assert.deepEqual(toolActionOptions({
+        command: 'gh',
+        path: 'not installed',
+        status: 'missing',
+        actionable: true,
+        uninstallable: false
+    }), [
+        {type: 'install', label: 'Install gh'}
+    ]);
+    assert.deepEqual(toolActionOptions({
+        command: 'gh',
+        path: '/home/user/.local/bin/gh',
+        status: 'update',
+        actionable: true,
+        uninstallable: true
+    }), [
+        {type: 'update', label: 'Update gh'},
+        {type: 'uninstall', label: 'Uninstall gh'}
+    ]);
+    assert.deepEqual(toolActionOptions({
+        command: 'gh',
+        status: 'current',
+        actionable: false,
+        uninstallable: true
+    }), [
+        {type: 'uninstall', label: 'Uninstall gh'}
+    ]);
+    assert.deepEqual(toolActionOptions({command: 'gh'}), []);
 });
 
 test('builds action file payloads', () => {

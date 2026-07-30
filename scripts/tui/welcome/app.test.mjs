@@ -10,10 +10,21 @@ const h = React.createElement;
 
 const NORMAL_ACTION_KEYS = [
     ['arrows', 'move selection'],
-    ['Enter', 'install/update selected'],
-    ['d/x', 'uninstall selected'],
-    ['r', 'refresh local status'],
+    ['Enter', 'choose selected action'],
     ['/', 'commands']
+];
+
+const TOOL_ACTION_KEYS = [
+    ['arrows', 'move action'],
+    ['Enter', 'run highlighted action'],
+    ['Backspace', 'close action menu'],
+    ['Esc', 'close action menu']
+];
+
+const TOOL_UNINSTALL_KEYS = [
+    ['y + Enter', 'confirm uninstall'],
+    ['Enter', 'cancel uninstall'],
+    ['Esc', 'cancel uninstall']
 ];
 
 const SLASH_ACTION_KEYS = [
@@ -27,7 +38,16 @@ const SLASH_ACTION_KEYS = [
 function assertActionKeyColumns(frame, rows) {
     const lines = frame.split('\n');
     const positions = rows.map(([key, description]) => {
-        const line = lines.find(candidate => candidate.includes('│') && candidate.includes(description));
+        const line = lines.find(candidate => {
+            const descriptionStart = candidate.indexOf(description);
+            const divider = candidate.lastIndexOf('│', descriptionStart);
+            const keyStart = candidate.indexOf(key, divider + 1);
+
+            return descriptionStart >= 0
+                && divider >= 0
+                && keyStart > divider
+                && keyStart + key.length <= descriptionStart;
+        });
         assert.ok(line, `missing action-key row: ${key} ${description}`);
 
         const descriptionStart = line.indexOf(description);
@@ -61,7 +81,8 @@ test('preserves the fixed action panel on narrow terminals', () => {
         assert.match(lines[0], /^┌.*┐$/);
         assert.match(lines.at(-1), /^└.*┘$/);
         assert.match(frame, /Action keys/);
-        assert.match(frame, /d\/x/);
+        assert.doesNotMatch(frame, /d\/x/);
+        assert.match(frame, /Enter/);
         assert.match(frame, /Status:/);
         assert.ok(lines.every(line => line.length <= width), `panel overflowed ${width} columns`);
     }
@@ -101,9 +122,10 @@ test('renders the welcome status rows', async () => {
     assert.match(lastFrame(), /gh/);
     assert.match(lastFrame(), /installed/);
     assert.match(lastFrame(), /Action keys/);
-    assert.match(lastFrame(), /Enter\s+install\/update selected/);
-    assert.match(lastFrame(), /d\/x\s+uninstall selected/);
-    assert.match(lastFrame(), /r\s+refresh local status/);
+    assert.match(lastFrame(), /Enter\s+choose selected action/);
+    assert.doesNotMatch(lastFrame(), /d\/x/);
+    assert.doesNotMatch(lastFrame(), /install\/update selected/);
+    assert.doesNotMatch(lastFrame(), /refresh local status/);
     assert.doesNotMatch(lastFrame(), /q\/Esc/);
     assert.doesNotMatch(lastFrame(), /q quit/);
     assert.match(lastFrame(), /type \/ for commands/);
@@ -111,7 +133,176 @@ test('renders the welcome status rows', async () => {
     unmount();
 });
 
-test('confirms tool uninstall action', async () => {
+test('shows only the actions available for the selected tool', async () => {
+    const cases = [
+        {
+            row: {
+                id: 'code',
+                command: 'code',
+                path: 'not installed',
+                current: 'unknown',
+                latest: 'unchecked',
+                status: 'missing',
+                installer: '/tmp/code.sh',
+                actionable: true,
+                uninstallable: false
+            },
+            expected: 'Install code',
+            absent: ['Update code', 'Uninstall code']
+        },
+        {
+            row: {
+                id: 'node',
+                command: 'node',
+                path: '/home/user/.config/nvm/versions/node/v24.2.0/bin/node',
+                current: '24.2.0',
+                latest: '24.3.0',
+                status: 'update',
+                installer: '',
+                actionable: true,
+                uninstallable: false
+            },
+            expected: 'Update node',
+            absent: ['Install node', 'Uninstall node']
+        },
+        {
+            row: {
+                id: 'tmux',
+                command: 'tmux',
+                path: '/home/user/.local/bin/tmux',
+                current: '3.5a',
+                latest: 'unchecked',
+                status: 'installed',
+                installer: '/tmp/tmux.sh',
+                actionable: false,
+                uninstallable: true
+            },
+            expected: 'Uninstall tmux',
+            absent: ['Install tmux', 'Update tmux']
+        }
+    ];
+
+    for (const {row, expected, absent} of cases) {
+        const loaders = {
+            loadTools: async () => ({kind: 'tools', includeUpdates: false, rows: [row]})
+        };
+        const {lastFrame, stdin, unmount} = render(h(App, {
+            loaders,
+            resultFile: '',
+            actionFile: '/tmp/unused-action'
+        }));
+
+        await new Promise(resolve => setTimeout(resolve, 20));
+        stdin.write('\r');
+        await new Promise(resolve => setTimeout(resolve, 20));
+
+        assert.match(lastFrame(), new RegExp(expected));
+        for (const label of absent) {
+            assert.doesNotMatch(lastFrame(), new RegExp(label));
+        }
+        assert.match(lastFrame(), new RegExp(`choose action for ${row.command}`));
+        assertActionKeyColumns(lastFrame(), TOOL_ACTION_KEYS);
+        unmount();
+    }
+});
+
+test('runs the selected install and update actions', async () => {
+    const rows = [
+        {
+            id: 'code',
+            command: 'code',
+            path: 'not installed',
+            current: 'unknown',
+            latest: 'unchecked',
+            status: 'missing',
+            installer: '/tmp/code.sh',
+            actionable: true,
+            uninstallable: false
+        },
+        {
+            id: 'node',
+            command: 'node',
+            path: '/home/user/.config/nvm/versions/node/v24.2.0/bin/node',
+            current: '24.2.0',
+            latest: '24.3.0',
+            status: 'update',
+            installer: '',
+            actionable: true,
+            uninstallable: false
+        }
+    ];
+
+    for (const row of rows) {
+        let action;
+        const loaders = {
+            loadTools: async () => ({kind: 'tools', includeUpdates: true, rows: [row]})
+        };
+        const {stdin, unmount} = render(h(App, {
+            loaders,
+            resultFile: '',
+            actionFile: '/tmp/unused-action',
+            initialIncludeUpdates: true,
+            writeActionFile: async (_file, nextAction) => {
+                action = nextAction;
+            }
+        }));
+
+        await new Promise(resolve => setTimeout(resolve, 20));
+        stdin.write('\r');
+        await new Promise(resolve => setTimeout(resolve, 20));
+        assert.equal(action, undefined);
+        stdin.write('\r');
+        await new Promise(resolve => setTimeout(resolve, 30));
+
+        assert.deepEqual(action, {
+            ACTION: 'install_tool',
+            COMMAND: row.command,
+            INCLUDE_UPDATES: '1',
+            VIEW: 'tools'
+        });
+        unmount();
+    }
+});
+
+test('warns when the selected tool has no available actions', async () => {
+    let actionWrites = 0;
+    const loaders = {
+        loadTools: async () => ({
+            kind: 'tools',
+            includeUpdates: false,
+            rows: [{
+                id: 'gh',
+                command: 'gh',
+                path: '/usr/bin/gh',
+                current: '2.0.0',
+                latest: 'unchecked',
+                status: 'installed',
+                installer: '/tmp/gh.sh',
+                actionable: false,
+                uninstallable: false
+            }]
+        })
+    };
+    const {lastFrame, stdin, unmount} = render(h(App, {
+        loaders,
+        resultFile: '',
+        actionFile: '/tmp/unused-action',
+        writeActionFile: async () => {
+            actionWrites += 1;
+        }
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    assert.match(lastFrame(), /gh has no available actions/);
+    assert.doesNotMatch(lastFrame(), /choose action for gh/);
+    assert.equal(actionWrites, 0);
+    unmount();
+});
+
+test('selects uninstall with arrows and confirms it explicitly', async () => {
     let action;
     const tools = {
         kind: 'tools',
@@ -148,17 +339,65 @@ test('confirms tool uninstall action', async () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('d');
     await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('x');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.doesNotMatch(lastFrame(), /choose action for gh/);
+    assert.doesNotMatch(lastFrame(), /uninstall selected command\? \[y\/N\]/);
+    assert.equal(action, undefined);
+
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(lastFrame(), /Update gh/);
+    assert.match(lastFrame(), /Uninstall gh/);
+    assert.doesNotMatch(lastFrame(), /Install gh/);
+    assertActionKeyColumns(lastFrame(), TOOL_ACTION_KEYS);
+
+    stdin.write('\x1B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.doesNotMatch(lastFrame(), /choose action for gh/);
+    assert.equal(action, undefined);
+
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x7f');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.doesNotMatch(lastFrame(), /choose action for gh/);
+    assert.equal(action, undefined);
+
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B[B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
     assert.match(lastFrame(), /uninstall selected command\? \[y\/N\]/);
+    assertActionKeyColumns(lastFrame(), TOOL_UNINSTALL_KEYS);
+    assert.equal(action, undefined);
 
     stdin.write('\x1B');
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.doesNotMatch(lastFrame(), /uninstall selected command\? \[y\/N\]/);
     assert.equal(action, undefined);
 
-    stdin.write('d');
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B[B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.match(lastFrame(), /uninstall selected command\? \[y\/N\]/);
 
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(lastFrame(), /Skipped uninstall/);
+    assert.equal(action, undefined);
+
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B[B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('y');
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\r');
@@ -235,7 +474,7 @@ test('backspace and Escape close the slash prompt', async () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.doesNotMatch(lastFrame(), /Check latest tool versions/);
     assert.match(lastFrame(), /type \/ for commands/);
-    assert.match(lastFrame(), /Enter\s+install\/update selected/);
+    assert.match(lastFrame(), /Enter\s+choose selected action/);
 
     stdin.write('/');
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -302,7 +541,9 @@ test('slash check updates the current table without adding a back level', async 
 
     stdin.write('r');
     await new Promise(resolve => setTimeout(resolve, 30));
-    assert.deepEqual(includeUpdates, [false, true, false]);
+    assert.deepEqual(includeUpdates, [false, true]);
+    assert.match(lastFrame(), /2\.1\.0/);
+    assert.match(lastFrame(), /remote checked/);
     assert.equal(actionWrites, 0);
     unmount();
 });
@@ -360,9 +601,11 @@ test('slash exit ends the session without writing an action', async () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\r');
     await new Promise(resolve => setTimeout(resolve, 30));
-    stdin.write('r');
-    await new Promise(resolve => setTimeout(resolve, 20));
 
+    stdin.write('/');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 30));
     assert.equal(loads, 1);
     assert.equal(actionWrites, 0);
     unmount();
@@ -400,6 +643,8 @@ test('tool selection ignores j/k and moves with arrows', async () => {
             stdin.write(input);
             await new Promise(resolve => setTimeout(resolve, 20));
         }
+        stdin.write('\r');
+        await new Promise(resolve => setTimeout(resolve, 20));
         stdin.write('\r');
         await new Promise(resolve => setTimeout(resolve, 30));
         unmount();

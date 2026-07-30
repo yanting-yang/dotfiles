@@ -38,8 +38,13 @@ export function moveSelection(selected, count, delta) {
     return (selected + count + delta) % count;
 }
 
-export function firstActionableTool(rows = []) {
-    const index = rows.findIndex(row => row.actionable);
+export function firstToolWithAction(rows = []) {
+    const actionable = rows.findIndex(row => row.actionable);
+    if (actionable >= 0) {
+        return actionable;
+    }
+
+    const index = rows.findIndex(row => row.uninstallable);
     return index >= 0 ? index : 0;
 }
 
@@ -77,6 +82,27 @@ export function resolveSlashCommand(input) {
         tone: 'warn',
         message: `Unknown command: /${command}. Try /help.`
     };
+}
+
+export function toolActionOptions(row) {
+    if (!row) {
+        return [];
+    }
+
+    const options = [];
+    const command = row.command ?? 'selected tool';
+
+    if (row.actionable) {
+        const type = row.status === 'missing' || row.path === 'not installed'
+            ? 'install'
+            : 'update';
+        options.push({type, label: `${type === 'install' ? 'Install' : 'Update'} ${command}`});
+    }
+    if (row.uninstallable) {
+        options.push({type: 'uninstall', label: `Uninstall ${command}`});
+    }
+
+    return options;
 }
 
 export function toolAction(row, includeUpdates) {
