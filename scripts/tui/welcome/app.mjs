@@ -79,7 +79,6 @@ function actionKeyRows(mode) {
         return [
             {key: 'arrows', description: 'move action'},
             {key: 'Enter', description: 'run highlighted action'},
-            {key: 'Backspace', description: 'close action menu'},
             {key: 'Esc', description: 'close action menu'}
         ];
     }
@@ -491,12 +490,6 @@ export function App({
                 return;
             }
             if (key.backspace || key.delete) {
-                if (inputMode === 'tool-action') {
-                    setInputMode('none');
-                    setInputText('');
-                    setToolActionSelected(0);
-                    return;
-                }
                 if (inputMode === 'slash' && inputText.length === 0) {
                     setInputMode('none');
                     setCommandSelected(0);

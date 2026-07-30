@@ -17,7 +17,6 @@ const NORMAL_ACTION_KEYS = [
 const TOOL_ACTION_KEYS = [
     ['arrows', 'move action'],
     ['Enter', 'run highlighted action'],
-    ['Backspace', 'close action menu'],
     ['Esc', 'close action menu']
 ];
 
@@ -360,6 +359,12 @@ test('selects uninstall with arrows and confirms it explicitly', async () => {
     stdin.write('\r');
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\x7f');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(lastFrame(), /choose action for gh/);
+    assert.doesNotMatch(lastFrame(), /Backspace\s+close action menu/);
+    assert.equal(action, undefined);
+
+    stdin.write('\x1B');
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.doesNotMatch(lastFrame(), /choose action for gh/);
     assert.equal(action, undefined);
