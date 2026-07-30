@@ -123,7 +123,13 @@ test('shows slash command menu with descriptions after typing slash', async () =
     await new Promise(resolve => setTimeout(resolve, 20));
 
     assert.doesNotMatch(lastFrame(), /\/nvm/);
-    assert.match(lastFrame(), /\/updates/);
+    assert.match(lastFrame(), /\/check\b/);
+    assert.match(lastFrame(), /\/help\b/);
+    assert.match(lastFrame(), /\/exit\b/);
+    assert.doesNotMatch(lastFrame(), /\/updates\b/);
+    assert.doesNotMatch(lastFrame(), /\/install\b/);
+    assert.doesNotMatch(lastFrame(), /\/update\b/);
+    assert.doesNotMatch(lastFrame(), /\/quit\b/);
     assert.doesNotMatch(lastFrame(), /Open Node versions/);
     assert.match(lastFrame(), /Check latest tool versions/);
     assert.match(lastFrame(), /arrows\s+move command/);
@@ -160,7 +166,57 @@ test('backspace on empty slash prompt returns to action keys', async () => {
     unmount();
 });
 
-test('arrow selection in slash menu controls enter command', async () => {
+test('slash check loads remote tool versions', async () => {
+    const includeUpdates = [];
+    const loaders = {
+        loadTools: async include => {
+            includeUpdates.push(include);
+            return {kind: 'tools', includeUpdates: include, rows: []};
+        }
+    };
+
+    const {stdin, unmount} = render(h(App, {
+        loaders,
+        resultFile: '',
+        actionFile: '/tmp/unused-action'
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('/');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    assert.equal(includeUpdates.at(-1), true);
+    unmount();
+});
+
+test('arrow selection in slash menu runs highlighted help command', async () => {
+    const loaders = {
+        loadTools: async () => ({kind: 'tools', includeUpdates: false, rows: []})
+    };
+
+    const {lastFrame, stdin, unmount} = render(h(App, {
+        loaders,
+        resultFile: '',
+        actionFile: '/tmp/unused-action'
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('/');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B[B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    assert.match(lastFrame(), /\/check\s+Check latest tool versions/);
+    assert.match(lastFrame(), /\/help\s+Show slash command help/);
+    assert.match(lastFrame(), /\/exit\s+Exit welcome/);
+    unmount();
+});
+
+test('Enter installs the selected actionable tool', async () => {
     let action;
     const loaders = {
         loadTools: async () => ({
@@ -191,12 +247,6 @@ test('arrow selection in slash menu controls enter command', async () => {
         }
     }));
 
-    await new Promise(resolve => setTimeout(resolve, 20));
-    stdin.write('/');
-    await new Promise(resolve => setTimeout(resolve, 20));
-    stdin.write('\x1B[B');
-    await new Promise(resolve => setTimeout(resolve, 20));
-    stdin.write('\x1B[B');
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\r');
     await new Promise(resolve => setTimeout(resolve, 30));

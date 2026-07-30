@@ -54,18 +54,17 @@ Useful controls:
 
 - `j/k` or arrows: move the selected tool
 - `/`: open the bottom command menu with command descriptions; arrows move the highlighted command, `Enter` runs it, and Backspace on an empty slash prompt returns to action keys
-- `/updates` or `/check`: check remote versions for managed tools; Node is checked through nvm against the latest release of its active major
-- `/install` or `/update`: install or update the selected actionable tool
+- `/check`: check remote versions for managed tools; Node is checked through nvm against the latest release of its active major
 - `/help`: show slash command help in the transcript
 - `Enter` installs or updates the selected tool, `d`/`x` uninstalls the selected managed tool, `r` refreshes local tool status, and `q`/`Esc` returns to local status or exits
-- `/quit` or `/exit`: exit from the slash command menu
+- `/exit`: exit Welcome
 
 Node appears in the normal tool list. Updating it installs and activates the latest
 release in the active major through nvm, then removes superseded installations from
 that major while preserving installations from other majors.
 
-The intentionally supported slash commands are `/updates`, `/check`, `/install`,
-`/update`, `/help`, `/quit`, and `/exit`. Removed commands and aliases such as
+The intentionally supported slash commands are `/check`, `/help`, and `/exit`.
+Removed commands and aliases such as `/updates`, `/install`, `/update`, `/quit`,
 `/nvm`, `/node`, `/tools`, `/local`, and `/all` should remain unavailable.
 
 ## Layout
@@ -104,5 +103,5 @@ HOME="$tmp_home" ./bootstrap.sh --yes
 ## Safety
 
 Installer scripts may download archives, replace stow packages, or update tool versions.
-Remote version checks should stay behind explicit user actions such as `/updates` and
+Remote version checks should stay behind explicit user actions such as `/check` and
 NVM remote refresh with `r`. Use `./bootstrap.sh --dry-run` before linking real dotfiles.

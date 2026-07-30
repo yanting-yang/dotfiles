@@ -5,6 +5,7 @@ import {
     moveSelection,
     normalizeSlashCommand,
     resolveSlashCommand,
+    SLASH_COMMANDS,
     toolAction,
     toolUninstallAction,
     visibleWindowStart
@@ -29,7 +30,19 @@ test('calculates selected row viewport start', () => {
 });
 
 test('normalizes and resolves slash commands', () => {
-    assert.equal(normalizeSlashCommand('/updates now'), 'updates');
+    assert.equal(normalizeSlashCommand('/check now'), 'check');
+    assert.deepEqual(SLASH_COMMANDS.map(command => command.name), [
+        '/check',
+        '/help',
+        '/exit'
+    ]);
+    assert.equal(resolveSlashCommand('/check').type, 'check');
+    assert.equal(resolveSlashCommand('/help').type, 'help');
+    assert.equal(resolveSlashCommand('/exit').type, 'exit');
+    assert.equal(resolveSlashCommand('/updates').type, 'message');
+    assert.equal(resolveSlashCommand('/install').type, 'message');
+    assert.equal(resolveSlashCommand('/update').type, 'message');
+    assert.equal(resolveSlashCommand('/quit').type, 'message');
     assert.equal(resolveSlashCommand('/nvm').type, 'message');
     assert.equal(resolveSlashCommand('/node').type, 'message');
     assert.equal(resolveSlashCommand('/tools').type, 'message');

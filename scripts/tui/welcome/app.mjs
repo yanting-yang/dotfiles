@@ -342,18 +342,15 @@ export function App({
         appendMessage(`/${commandText.trim().replace(/^\/+/, '') || 'help'}`, 'info', 'you');
 
         switch (result.type) {
-            case 'updates':
+            case 'check':
                 refreshTools(true, 'Latest tool versions loaded.');
-                break;
-            case 'install':
-                submitToolInstall();
                 break;
             case 'help':
                 for (const line of HELP_LINES) {
                     appendMessage(line);
                 }
                 break;
-            case 'quit':
+            case 'exit':
                 exit();
                 break;
             case 'message':
@@ -363,7 +360,7 @@ export function App({
                 appendMessage('Command did nothing.', 'warn');
                 break;
         }
-    }, [appendMessage, exit, refreshTools, submitToolInstall]);
+    }, [appendMessage, exit, refreshTools]);
 
     const handleInputSubmit = useCallback(() => {
         if (inputMode === 'slash') {

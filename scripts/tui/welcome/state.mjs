@@ -1,23 +1,8 @@
 export const SLASH_COMMANDS = [
     {
-        name: '/updates',
-        description: 'Check latest tool versions',
-        result: {type: 'updates'}
-    },
-    {
         name: '/check',
         description: 'Check latest tool versions',
-        result: {type: 'updates'}
-    },
-    {
-        name: '/install',
-        description: 'Install or update the selected actionable tool',
-        result: {type: 'install'}
-    },
-    {
-        name: '/update',
-        description: 'Install or update the selected actionable tool',
-        result: {type: 'install'}
+        result: {type: 'check'}
     },
     {
         name: '/help',
@@ -25,14 +10,9 @@ export const SLASH_COMMANDS = [
         result: {type: 'help'}
     },
     {
-        name: '/quit',
-        description: 'Exit welcome',
-        result: {type: 'quit'}
-    },
-    {
         name: '/exit',
         description: 'Exit welcome',
-        result: {type: 'quit'}
+        result: {type: 'exit'}
     }
 ];
 
