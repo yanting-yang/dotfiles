@@ -19,6 +19,152 @@ else
     HAD_NVM_DIR=0
 fi
 
+# Welcome must select the repository's Node major before validating or
+# launching the app. Keep this in a subshell so its fake runtime cannot leak
+# into the remaining bridge tests.
+mkdir -p "$TMP_DIR/runtime-node-modules/ink" "$TMP_DIR/runtime-node-modules/react"
+: >"$TMP_DIR/runtime-cli.mjs"
+(
+    WELCOME_NODE_MODULES="$TMP_DIR/runtime-node-modules"
+    WELCOME_APP="$TMP_DIR/runtime-cli.mjs"
+    RUNTIME_ACTIVE_MAJOR=22
+    RUNTIME_SELECTED_PATH="$TMP_DIR/runtime-node-24/bin"
+    RUNTIME_LOG="$TMP_DIR/runtime-success.log"
+    : >"$RUNTIME_LOG"
+
+    welcome_load_nvm() {
+        printf 'load-nvm\n' >>"$RUNTIME_LOG"
+    }
+
+    nvm() {
+        printf 'nvm:%s\n' "$*" >>"$RUNTIME_LOG"
+        case "$*" in
+            "use --silent 24")
+                RUNTIME_ACTIVE_MAJOR=24
+                PATH="$RUNTIME_SELECTED_PATH:$PATH"
+                export PATH
+                ;;
+            *)
+                return 91
+                ;;
+        esac
+    }
+
+    node() {
+        printf 'node:%s\n' "$*" >>"$RUNTIME_LOG"
+        case "${1:-}" in
+            -p)
+                printf '%s\n' "$RUNTIME_ACTIVE_MAJOR"
+                ;;
+            --version)
+                printf 'v%s.1.0\n' "$RUNTIME_ACTIVE_MAJOR"
+                ;;
+            *)
+                return 92
+                ;;
+        esac
+    }
+
+    welcome_require_runtime
+    [ "$RUNTIME_ACTIVE_MAJOR" -eq 24 ]
+    [ "${PATH%%:*}" = "$RUNTIME_SELECTED_PATH" ]
+    [ "$(sed -n '1p' "$RUNTIME_LOG")" = "load-nvm" ]
+    [ "$(sed -n '2p' "$RUNTIME_LOG")" = "nvm:use --silent 24" ]
+    case "$(sed -n '3p' "$RUNTIME_LOG")" in
+        node:-p*) ;;
+        *)
+            printf 'Node was validated before nvm selected the Welcome runtime\n' >&2
+            exit 1
+            ;;
+    esac
+)
+
+# A failed local activation must stop before Node validation. Starting Welcome
+# must not turn that failure into an implicit install or remote version check.
+(
+    WELCOME_NODE_MODULES="$TMP_DIR/runtime-node-modules"
+    WELCOME_APP="$TMP_DIR/runtime-cli.mjs"
+    RUNTIME_LOG="$TMP_DIR/runtime-failure.log"
+    RUNTIME_OUTPUT="$TMP_DIR/runtime-failure.out"
+    : >"$RUNTIME_LOG"
+
+    welcome_load_nvm() {
+        printf 'load-nvm\n' >>"$RUNTIME_LOG"
+    }
+
+    nvm() {
+        printf 'nvm:%s\n' "$*" >>"$RUNTIME_LOG"
+        case "$*" in
+            "use --silent 24")
+                return 42
+                ;;
+            install*|version-remote*)
+                return 93
+                ;;
+            *)
+                return 94
+                ;;
+        esac
+    }
+
+    node() {
+        printf 'node:%s\n' "$*" >>"$RUNTIME_LOG"
+        return 95
+    }
+
+    if welcome_require_runtime >"$RUNTIME_OUTPUT" 2>&1; then
+        printf 'Welcome accepted a failed nvm runtime activation\n' >&2
+        exit 1
+    fi
+    [ -s "$RUNTIME_OUTPUT" ]
+    [ "$(sed -n '1p' "$RUNTIME_LOG")" = "load-nvm" ]
+    [ "$(sed -n '2p' "$RUNTIME_LOG")" = "nvm:use --silent 24" ]
+    [ "$(wc -l <"$RUNTIME_LOG")" -eq 2 ]
+    if grep -Eq '^nvm:(install|version-remote)' "$RUNTIME_LOG"; then
+        printf 'Welcome performed a network-capable Node action during startup\n' >&2
+        exit 1
+    fi
+    if grep -q '^node:' "$RUNTIME_LOG"; then
+        printf 'Welcome validated Node after nvm activation failed\n' >&2
+        exit 1
+    fi
+)
+
+# Direct Bash execution must take the executable branch rather than reaching a
+# top-level return intended for sourced shells.
+mkdir -p "$TMP_DIR/direct-home" "$TMP_DIR/direct-nvm" "$TMP_DIR/direct-bin"
+cat >"$TMP_DIR/direct-bin/node" <<'SCRIPT'
+#!/bin/sh
+case "${1:-}" in
+    -p)
+        printf '24\n'
+        ;;
+    --version)
+        printf 'v24.1.0\n'
+        ;;
+    *)
+        printf 'direct welcome app launched\n'
+        ;;
+esac
+SCRIPT
+chmod +x "$TMP_DIR/direct-bin/node"
+cat >"$TMP_DIR/direct-nvm/nvm.sh" <<'SCRIPT'
+nvm() {
+    if [ "$*" = "use --silent 24" ]; then
+        PATH="$DIRECT_NODE_BIN:$PATH"
+        export PATH
+        return 0
+    fi
+    return 91
+}
+SCRIPT
+direct_output=$(WELCOME_SH_NO_AUTO_RUN=0 \
+    HOME="$TMP_DIR/direct-home" \
+    NVM_DIR="$TMP_DIR/direct-nvm" \
+    DIRECT_NODE_BIN="$TMP_DIR/direct-bin" \
+    bash "$ROOT_DIR/welcome.sh")
+grep -Fq 'direct welcome app launched' <<<"$direct_output"
+
 mkdir -p "$TMP_DIR/home" "$TMP_DIR/bin"
 HOME="$TMP_DIR/home"
 NVM_DIR="$TMP_DIR/nvm"

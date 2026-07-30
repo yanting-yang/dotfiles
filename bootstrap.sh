@@ -10,7 +10,6 @@ BACKUP_DIR=""
 source "$DOTFILES_DIR/scripts/lib/node.sh"
 
 SOURCES=(
-    "$DOTFILES_DIR/.nvmrc"
     "$DOTFILES_DIR/.profile"
     "$DOTFILES_DIR/.bashrc"
     "$DOTFILES_DIR/.ssh/config"
@@ -19,7 +18,6 @@ SOURCES=(
 )
 
 TARGETS=(
-    "$HOME/.nvmrc"
     "$HOME/.profile"
     "$HOME/.bashrc"
     "$HOME/.ssh/config"
@@ -135,15 +133,33 @@ node_satisfies_welcome() {
     [ "$major" -eq "$WELCOME_NODE_MAJOR" ]
 }
 
+welcome_nvm_runtime_ready() {
+    local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
+
+    [ -s "$nvm_dir/nvm.sh" ] || return 1
+    (
+        # shellcheck source=/dev/null
+        source "$nvm_dir/nvm.sh" --no-use
+        command -v nvm >/dev/null 2>&1 || return 1
+        NVM_SYMLINK_CURRENT=false \
+            nvm use --silent "$WELCOME_NODE_VERSION" >/dev/null 2>&1 || return 1
+        node_satisfies_welcome || return 1
+        command -v npm >/dev/null 2>&1
+    )
+}
+
 welcome_deps_installed() {
     [ -d "$DOTFILES_DIR/node_modules/ink" ] \
         && [ -d "$DOTFILES_DIR/node_modules/react" ]
 }
 
 welcome_dependency_status() {
-    if node_satisfies_welcome && command -v npm >/dev/null 2>&1 && welcome_deps_installed; then
+    local runtime_ready=0
+
+    welcome_nvm_runtime_ready && runtime_ready=1
+    if [ "$runtime_ready" -eq 1 ] && welcome_deps_installed; then
         printf 'ok'
-    elif node_satisfies_welcome && command -v npm >/dev/null 2>&1; then
+    elif [ "$runtime_ready" -eq 1 ]; then
         printf 'npm-ci'
     else
         printf 'node-and-npm-ci'
@@ -174,10 +190,10 @@ print_plan() {
     printf '\nWelcome TUI:\n'
     case "$welcome_status" in
         ok)
-            printf '  ok      Node %s with Ink dependencies installed\n' "$(node --version)"
+            printf '  ok      Node %s.x available through nvm with Ink dependencies installed\n' "$WELCOME_NODE_MAJOR"
             ;;
         npm-ci)
-            printf '  install npm ci in %s\n' "$DOTFILES_DIR"
+            printf '  install npm ci with nvm Node %s in %s\n' "$WELCOME_NODE_VERSION" "$DOTFILES_DIR"
             ;;
         node-and-npm-ci)
             printf '  install nvm/Node %s if needed, then npm ci in %s\n' "$WELCOME_NODE_VERSION" "$DOTFILES_DIR"
@@ -267,22 +283,33 @@ backup_only_targets() {
 load_or_install_welcome_node() {
     local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
     local nvm_installer="$DOTFILES_DIR/scripts/install/nvm.sh"
+    local installed_version default_alias_file="$nvm_dir/alias/default"
+    local had_default_alias=0
 
-    if node_satisfies_welcome && command -v npm >/dev/null 2>&1; then
-        return 0
+    if [ -e "$default_alias_file" ] || [ -L "$default_alias_file" ]; then
+        had_default_alias=1
     fi
 
-    printf '\nPreparing Node %s for welcome TUI...\n' "$WELCOME_NODE_VERSION"
-    [ -f "$nvm_installer" ] || die "missing nvm installer: $nvm_installer"
-    bash "$nvm_installer"
+    if [ ! -s "$nvm_dir/nvm.sh" ]; then
+        printf '\nPreparing nvm for welcome TUI...\n'
+        [ -f "$nvm_installer" ] || die "missing nvm installer: $nvm_installer"
+        bash "$nvm_installer"
+    fi
 
     [ -s "$nvm_dir/nvm.sh" ] || die "nvm install completed, but $nvm_dir/nvm.sh is missing"
     # shellcheck source=/dev/null
     source "$nvm_dir/nvm.sh" --no-use
     command -v nvm >/dev/null 2>&1 || die "nvm install completed, but nvm is unavailable"
 
-    nvm install "$WELCOME_NODE_VERSION"
-    nvm alias default "$WELCOME_NODE_VERSION" >/dev/null
+    installed_version=$(nvm version "$WELCOME_NODE_VERSION" 2>/dev/null || true)
+    if [[ ! "$installed_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        printf '\nPreparing Node %s for welcome TUI...\n' "$WELCOME_NODE_VERSION"
+        nvm install "$WELCOME_NODE_VERSION"
+        if [ "$had_default_alias" -eq 0 ] \
+            && { [ -e "$default_alias_file" ] || [ -L "$default_alias_file" ]; }; then
+            rm -f -- "$default_alias_file"
+        fi
+    fi
     nvm use "$WELCOME_NODE_VERSION"
 
     node_satisfies_welcome || die "Node $WELCOME_NODE_MAJOR.x is still unavailable after installing Node $WELCOME_NODE_VERSION"
@@ -290,7 +317,7 @@ load_or_install_welcome_node() {
 }
 
 install_welcome_deps() {
-    if node_satisfies_welcome && command -v npm >/dev/null 2>&1 && welcome_deps_installed; then
+    if welcome_nvm_runtime_ready && welcome_deps_installed; then
         printf '\nWelcome TUI dependencies already installed.\n'
         return 0
     fi

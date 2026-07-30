@@ -21,10 +21,11 @@ legacy `.lesshst`, `.bash_history`, and `.bash_logout` files under
 `$HOME/.dotfiles-backup/`, and prepares the Ink-based welcome TUI. On a new system it
 may install or activate nvm/Node and then run `npm ci` in this repository.
 
-The welcome TUI's Node major is pinned in `.nvmrc`. Bootstrap links that file to
-`$HOME/.nvmrc` and installs the pinned major through nvm when a compatible Node/npm
-pair is not already available. `WELCOME_NODE_VERSION` can select a specific release
-within the pinned major.
+The welcome TUI's Node major is pinned in the repository-local `.nvmrc`; Bootstrap
+does not link it to `$HOME`. Bootstrap ensures that nvm has a compatible runtime for
+the pinned major, installing it when needed. `WELCOME_NODE_VERSION` can select a
+specific release within that major. This setup does not change nvm's global default
+alias.
 
 The package and lockfile engine ranges are generated mirrors. After changing
 `.nvmrc`, synchronize them with:
@@ -40,7 +41,8 @@ Ink/React terminal app with local-first status checks. It opens in the terminal
 alternate screen with a Claude Code-style layout: a bordered welcome/status panel at
 the top, working content in the middle, and a fixed input bar at the bottom. While
 active, it sets the terminal window title to `Welcome` and restores the previous
-title on exit.
+title on exit. Before launching the app, `welcome.sh` explicitly runs `nvm use` for
+the major pinned in the repository's `.nvmrc`.
 
 Run it manually:
 
@@ -69,7 +71,7 @@ The intentionally supported slash commands are `/updates`, `/check`, `/install`,
 ## Layout
 
 - `.profile`, `.bashrc`, `welcome.sh`, `bootstrap.sh`: root shell entry points.
-- `.nvmrc`: canonical Node major, managed as `$HOME/.nvmrc`.
+- `.nvmrc`: repository-local canonical Node major for the welcome TUI and package metadata.
 - `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.ssh/config`: managed configuration.
 - `scripts/lib/`: shared Bash helpers for installers, status checks, and terminal utilities.
 - `scripts/install/`: explicit installers for managed tools.

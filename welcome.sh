@@ -16,7 +16,7 @@ source "$WELCOME_LIB_DIR/tool_status.sh"
 source "$WELCOME_LIB_DIR/node.sh"
 
 welcome_is_sourced() {
-    [ "${#BASH_SOURCE[@]}" -gt 1 ]
+    [ "${BASH_SOURCE[0]}" != "$0" ]
 }
 
 welcome_require_runtime() {
@@ -26,6 +26,14 @@ welcome_require_runtime() {
         printf 'Welcome requires one numeric Node major in %s.\n' "$WELCOME_DOTFILES_DIR/.nvmrc"
         return 1
     fi
+
+    welcome_load_nvm || return 1
+    if ! nvm use --silent "$required_node_major"; then
+        printf 'Welcome requires Node %s.x through nvm. Install it with `nvm install %s`.\n' \
+            "$required_node_major" "$required_node_major"
+        return 1
+    fi
+    hash -r 2>/dev/null || true
 
     if ! command -v node >/dev/null 2>&1; then
         printf 'Welcome requires Node %s.x. Run npm install in %s after Node is available.\n' "$required_node_major" "$WELCOME_DOTFILES_DIR"
