@@ -79,8 +79,7 @@ function actionKeyRows(mode) {
         {key: 'Enter', description: 'install/update selected'},
         {key: 'd/x', description: 'uninstall selected'},
         {key: 'r', description: 'refresh local status'},
-        {key: '/', description: 'commands'},
-        {key: 'q/Esc', description: 'local status or exit'}
+        {key: '/', description: 'commands'}
     ];
 }
 
@@ -178,7 +177,7 @@ function Prompt({mode, text}) {
         return h(Text, {color: 'yellow'}, `uninstall selected command? [y/N] ${text}`);
     }
 
-    return h(Text, {color: 'gray'}, 'arrows move  Enter install/update  d uninstall  / command  r local refresh  q quit');
+    return h(Text, {color: 'gray'}, 'arrows move  Enter install/update  d uninstall  / command  r local refresh');
 }
 
 function CommandMenu({commands, selected, maxRows}) {
@@ -466,14 +465,6 @@ export function App({
         if (input === 'd' || input === 'D' || input === 'x' || input === 'X') {
             beginToolUninstall();
             return;
-        }
-
-        if (input === 'q' || input === 'Q' || key.escape) {
-            if (includeUpdates) {
-                refreshTools(false, 'Back to local welcome.');
-            } else {
-                exit();
-            }
         }
     });
 

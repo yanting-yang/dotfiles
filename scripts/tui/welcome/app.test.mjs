@@ -13,8 +13,7 @@ const NORMAL_ACTION_KEYS = [
     ['Enter', 'install/update selected'],
     ['d/x', 'uninstall selected'],
     ['r', 'refresh local status'],
-    ['/', 'commands'],
-    ['q/Esc', 'local status or exit']
+    ['/', 'commands']
 ];
 
 const SLASH_ACTION_KEYS = [
@@ -63,7 +62,6 @@ test('preserves the fixed action panel on narrow terminals', () => {
         assert.match(lines.at(-1), /^└.*┘$/);
         assert.match(frame, /Action keys/);
         assert.match(frame, /d\/x/);
-        assert.match(frame, /q\/Esc/);
         assert.match(frame, /Status:/);
         assert.ok(lines.every(line => line.length <= width), `panel overflowed ${width} columns`);
     }
@@ -106,7 +104,8 @@ test('renders the welcome status rows', async () => {
     assert.match(lastFrame(), /Enter\s+install\/update selected/);
     assert.match(lastFrame(), /d\/x\s+uninstall selected/);
     assert.match(lastFrame(), /r\s+refresh local status/);
-    assert.match(lastFrame(), /q\/Esc\s+local status or exit/);
+    assert.doesNotMatch(lastFrame(), /q\/Esc/);
+    assert.doesNotMatch(lastFrame(), /q quit/);
     assert.match(lastFrame(), /type \/ for commands/);
     assertActionKeyColumns(lastFrame(), NORMAL_ACTION_KEYS);
     unmount();
@@ -147,6 +146,15 @@ test('confirms tool uninstall action', async () => {
     }));
 
     await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('d');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(lastFrame(), /uninstall selected command\? \[y\/N\]/);
+
+    stdin.write('\x1B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.doesNotMatch(lastFrame(), /uninstall selected command\? \[y\/N\]/);
+    assert.equal(action, undefined);
+
     stdin.write('d');
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.match(lastFrame(), /uninstall selected command\? \[y\/N\]/);
@@ -207,7 +215,7 @@ test('shows slash command menu with descriptions after typing slash', async () =
     unmount();
 });
 
-test('backspace on empty slash prompt returns to action keys', async () => {
+test('backspace and Escape close the slash prompt', async () => {
     const loaders = {
         loadTools: async () => ({kind: 'tools', includeUpdates: false, rows: []})
     };
@@ -228,31 +236,74 @@ test('backspace on empty slash prompt returns to action keys', async () => {
     assert.doesNotMatch(lastFrame(), /Check latest tool versions/);
     assert.match(lastFrame(), /type \/ for commands/);
     assert.match(lastFrame(), /Enter\s+install\/update selected/);
+
+    stdin.write('/');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.doesNotMatch(lastFrame(), /Check latest tool versions/);
+    assert.match(lastFrame(), /type \/ for commands/);
     unmount();
 });
 
-test('slash check loads remote tool versions', async () => {
+test('slash check updates the current table without adding a back level', async () => {
     const includeUpdates = [];
+    let actionWrites = 0;
     const loaders = {
         loadTools: async include => {
             includeUpdates.push(include);
-            return {kind: 'tools', includeUpdates: include, rows: []};
+            return {
+                kind: 'tools',
+                includeUpdates: include,
+                rows: [{
+                    id: 'gh',
+                    command: 'gh',
+                    path: '/usr/bin/gh',
+                    current: '2.0.0',
+                    latest: include ? '2.1.0' : 'unchecked',
+                    status: include ? 'update' : 'installed',
+                    installer: '/tmp/gh.sh',
+                    actionable: include,
+                    uninstallable: false
+                }]
+            };
         }
     };
 
-    const {stdin, unmount} = render(h(App, {
+    const {lastFrame, stdin, unmount} = render(h(App, {
         loaders,
         resultFile: '',
-        actionFile: '/tmp/unused-action'
+        actionFile: '/tmp/unused-action',
+        writeActionFile: async () => {
+            actionWrites += 1;
+        }
     }));
 
     await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(includeUpdates, [false]);
     stdin.write('/');
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\r');
     await new Promise(resolve => setTimeout(resolve, 30));
 
-    assert.equal(includeUpdates.at(-1), true);
+    assert.deepEqual(includeUpdates, [false, true]);
+    assert.match(lastFrame(), /2\.1\.0/);
+    assert.match(lastFrame(), /remote checked/);
+    assert.doesNotMatch(lastFrame(), /Back to local welcome/);
+
+    stdin.write('q');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    assert.deepEqual(includeUpdates, [false, true]);
+    assert.match(lastFrame(), /2\.1\.0/);
+    assert.match(lastFrame(), /remote checked/);
+
+    stdin.write('r');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.deepEqual(includeUpdates, [false, true, false]);
+    assert.equal(actionWrites, 0);
     unmount();
 });
 
@@ -278,6 +329,42 @@ test('arrow selection in slash menu runs highlighted help command', async () => 
     assert.match(lastFrame(), /\/check\s+Check latest tool versions/);
     assert.match(lastFrame(), /\/help\s+Show slash command help/);
     assert.match(lastFrame(), /\/exit\s+Exit welcome/);
+    unmount();
+});
+
+test('slash exit ends the session without writing an action', async () => {
+    let loads = 0;
+    let actionWrites = 0;
+    const loaders = {
+        loadTools: async () => {
+            loads += 1;
+            return {kind: 'tools', includeUpdates: false, rows: []};
+        }
+    };
+
+    const {stdin, unmount} = render(h(App, {
+        loaders,
+        resultFile: '',
+        actionFile: '/tmp/unused-action',
+        writeActionFile: async () => {
+            actionWrites += 1;
+        }
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('/');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B[B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\x1B[B');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    stdin.write('r');
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    assert.equal(loads, 1);
+    assert.equal(actionWrites, 0);
     unmount();
 });
 

@@ -54,10 +54,10 @@ Useful controls:
 
 - arrows: move the selected tool
 - `/`: open the bottom command menu with command descriptions; arrows move the highlighted command, `Enter` runs it, and Backspace on an empty slash prompt returns to action keys
-- `/check`: check remote versions for managed tools; Node is checked through nvm against the latest release of its active major
+- `/check`: update the current table with remote versions for managed tools; Node is checked through nvm against the latest release of its active major
 - `/help`: show slash command help in the transcript
-- `Enter` installs or updates the selected tool, `d`/`x` uninstalls the selected managed tool, `r` refreshes local tool status, and `q`/`Esc` returns to local status or exits
-- `/exit`: exit Welcome
+- `Enter` installs or updates the selected tool, `d`/`x` uninstalls the selected managed tool, and `r` refreshes local tool status
+- `/exit`: the only way to exit Welcome
 
 Node appears in the normal tool list. Updating it installs and activates the latest
 release in the active major through nvm, then removes superseded installations from
