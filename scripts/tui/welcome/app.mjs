@@ -63,24 +63,24 @@ function statusCounts(rows) {
     }, {});
 }
 
-function actionKeyLines(mode) {
+function actionKeyRows(mode) {
     if (mode === 'slash') {
         return [
-            'arrows  move command',
-            'Enter  run highlighted command',
-            'type  filter commands',
-            'Backspace  edit or close',
-            'Esc  close command menu'
+            {key: 'arrows', description: 'move command'},
+            {key: 'Enter', description: 'run highlighted command'},
+            {key: 'type', description: 'filter commands'},
+            {key: 'Backspace', description: 'edit or close'},
+            {key: 'Esc', description: 'close command menu'}
         ];
     }
 
     return [
-        'j/k or arrows  move selection',
-        'Enter  install/update selected',
-        'd/x  uninstall selected',
-        'r  refresh local status',
-        '/  commands',
-        'q/Esc  local status or exit'
+        {key: 'arrows', description: 'move selection'},
+        {key: 'Enter', description: 'install/update selected'},
+        {key: 'd/x', description: 'uninstall selected'},
+        {key: 'r', description: 'refresh local status'},
+        {key: '/', description: 'commands'},
+        {key: 'q/Esc', description: 'local status or exit'}
     ];
 }
 
@@ -106,13 +106,15 @@ function slashCommandMatches(filter) {
     });
 }
 
-function WelcomePanel({inputMode, width, height, rows, includeUpdates}) {
+export function WelcomePanel({inputMode, width, height, rows, includeUpdates}) {
     const username = process.env.USER ?? 'friend';
     const cwd = process.cwd().replace(process.env.HOME ?? '', '~');
-    const leftWidth = Math.max(28, Math.min(48, Math.floor(width * 0.28)));
+    const preferredLeftWidth = Math.max(28, Math.min(48, Math.floor(width * 0.28)));
+    const leftWidth = Math.min(preferredLeftWidth, Math.max(10, width - 28));
     const counts = statusCounts(rows);
     const summary = includeUpdates ? 'remote checked' : 'local only';
-    const actions = actionKeyLines(inputMode);
+    const actions = actionKeyRows(inputMode);
+    const actionKeyWidth = Math.max(...actions.map(action => action.key.length));
 
     return h(Box, {
         borderStyle: 'single',
@@ -122,17 +124,20 @@ function WelcomePanel({inputMode, width, height, rows, includeUpdates}) {
         flexShrink: 0
     },
         h(Box, {width: leftWidth, flexDirection: 'column', alignItems: 'center', paddingX: 1},
-            h(Text, {bold: true}, `Welcome back ${username}!`),
-            h(Text, {color: 'gray'}, `Tools ${rows.length}  updates ${counts.update ?? 0}  missing ${counts.missing ?? 0}`),
-            h(Text, {color: 'gray'}, truncate(cwd, Math.max(10, leftWidth - 4)))
+            h(Text, {bold: true, wrap: 'truncate-end'}, `Welcome back ${username}!`),
+            h(Text, {color: 'gray', wrap: 'truncate-end'}, `Tools ${rows.length}  updates ${counts.update ?? 0}  missing ${counts.missing ?? 0}`),
+            h(Text, {color: 'gray', wrap: 'truncate-end'}, truncate(cwd, Math.max(10, leftWidth - 4)))
         ),
         h(Box, {width: 1, flexDirection: 'column', flexShrink: 0},
             ...Array.from({length: Math.max(1, height - 2)}, (_, index) => h(Text, {key: index, color: 'red'}, '│'))
         ),
         h(Box, {flexGrow: 1, flexDirection: 'column', paddingX: 1},
-            h(Text, {bold: true, color: 'red'}, 'Action keys'),
-            ...actions.map(line => h(Text, {key: line}, line)),
-            h(Text, {color: 'gray'}, `Status: Managed tools · ${summary}`)
+            h(Text, {bold: true, color: 'red', wrap: 'truncate-end'}, 'Action keys'),
+            ...actions.map(action => h(Text, {
+                key: action.key,
+                wrap: 'truncate-end'
+            }, `${action.key.padEnd(actionKeyWidth)}  ${action.description}`)),
+            h(Text, {color: 'gray', wrap: 'truncate-end'}, `Status: Managed tools · ${summary}`)
         )
     );
 }
@@ -173,7 +178,7 @@ function Prompt({mode, text}) {
         return h(Text, {color: 'yellow'}, `uninstall selected command? [y/N] ${text}`);
     }
 
-    return h(Text, {color: 'gray'}, 'j/k move  Enter install/update  d uninstall  / command  r local refresh  q quit');
+    return h(Text, {color: 'gray'}, 'arrows move  Enter install/update  d uninstall  / command  r local refresh  q quit');
 }
 
 function CommandMenu({commands, selected, maxRows}) {
@@ -402,11 +407,11 @@ export function App({
                 setCommandSelected(0);
                 return;
             }
-            if (inputMode === 'slash' && (key.upArrow || input === 'k' || input === 'K')) {
+            if (inputMode === 'slash' && key.upArrow) {
                 setCommandSelected(current => moveSelection(current, slashCommands.length, -1));
                 return;
             }
-            if (inputMode === 'slash' && (key.downArrow || input === 'j' || input === 'J')) {
+            if (inputMode === 'slash' && key.downArrow) {
                 setCommandSelected(current => moveSelection(current, slashCommands.length, 1));
                 return;
             }
@@ -438,12 +443,12 @@ export function App({
             return;
         }
 
-        if (key.upArrow || input === 'k' || input === 'K') {
+        if (key.upArrow) {
             setToolSelected(current => moveSelection(current, toolRows.length, -1));
             return;
         }
 
-        if (key.downArrow || input === 'j' || input === 'J') {
+        if (key.downArrow) {
             setToolSelected(current => moveSelection(current, toolRows.length, 1));
             return;
         }

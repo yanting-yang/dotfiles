@@ -52,7 +52,7 @@ source ./welcome.sh
 
 Useful controls:
 
-- `j/k` or arrows: move the selected tool
+- arrows: move the selected tool
 - `/`: open the bottom command menu with command descriptions; arrows move the highlighted command, `Enter` runs it, and Backspace on an empty slash prompt returns to action keys
 - `/check`: check remote versions for managed tools; Node is checked through nvm against the latest release of its active major
 - `/help`: show slash command help in the transcript
