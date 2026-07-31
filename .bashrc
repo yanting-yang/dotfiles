@@ -67,3 +67,4 @@ TEXLIVE_PATH="/usr/local/texlive/2026/bin/x86_64-linux"
 [ -d "$TEXLIVE_PATH" ] && export PATH="$TEXLIVE_PATH:$PATH"
 
 export LESSHISTFILE="$HOME/.local/state/lesshst"
+export TZ="America/Vancouver"
