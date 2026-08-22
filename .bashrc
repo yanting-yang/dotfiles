@@ -4,6 +4,14 @@ case $- in
     *) return ;;
 esac
 
+welcome() {
+    . "$HOME/dotfiles/welcome.sh"
+}
+
+if [ -z "$TMUX" ] && [ -t 0 ]; then
+    printf 'Run `welcome` to show the welcome message.\n'
+fi
+
 timer_calc() {
     [[ -v _cmd_start ]] || return 0
 
