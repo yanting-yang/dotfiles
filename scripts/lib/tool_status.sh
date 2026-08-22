@@ -113,6 +113,32 @@ get_cmd_path() {
     fi
 }
 
+maple_font_dir() {
+    printf '%s/.local/share/fonts/maple' "$HOME"
+}
+
+maple_font_installed() {
+    local dir="$1"
+
+    [ -d "$dir" ] || return 1
+    find "$dir" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit 2>/dev/null \
+        | grep -q .
+}
+
+maple_font_version() {
+    local marker="$1/.maple-version" version
+
+    if [ -s "$marker" ]; then
+        IFS= read -r version <"$marker" 2>/dev/null || version=""
+        if [ -n "$version" ]; then
+            printf '%s' "$version"
+            return 0
+        fi
+    fi
+
+    printf 'unknown'
+}
+
 latest_is_newer() {
     local current="$1" latest="$2"
 
@@ -230,6 +256,8 @@ load_rows() {
     local nvm_latest nvm_current nvm_dir nvm_available=0
     local stow_latest stow_current
     local tmux_latest tmux_current
+    local kitty_latest kitty_current
+    local maple_latest maple_current maple_dir
     local code_bin="$HOME/code"
 
     clear_rows
@@ -320,6 +348,25 @@ load_rows() {
     else
         add_missing_row "tmux" "$tmux_latest" "$TOOL_STATUS_INSTALL_DIR/tmux.sh"
     fi
+
+    kitty_latest="$LATEST_UNCHECKED"
+    if command -v kitty >/dev/null 2>&1; then
+        [ "$include_updates" -eq 1 ] && kitty_latest=$(get_github_latest https://github.com/kovidgoyal/kitty kitty)
+        kitty_current=$(kitty --version 2>/dev/null | awk 'NR==1{print $2}')
+        add_cmd_row "kitty" "kitty" "$kitty_current" "$kitty_latest" "$TOOL_STATUS_INSTALL_DIR/kitty.sh"
+    else
+        add_missing_row "kitty" "$kitty_latest" "$TOOL_STATUS_INSTALL_DIR/kitty.sh"
+    fi
+
+    maple_latest="$LATEST_UNCHECKED"
+    maple_dir=$(maple_font_dir)
+    if maple_font_installed "$maple_dir"; then
+        [ "$include_updates" -eq 1 ] && maple_latest=$(get_github_latest https://github.com/subframe7536/maple-font maple)
+        maple_current=$(maple_font_version "$maple_dir")
+        add_row "maple" "$maple_dir" "$maple_current" "$maple_latest" "$TOOL_STATUS_INSTALL_DIR/maple-font.sh"
+    else
+        add_missing_row "maple" "$maple_latest" "$TOOL_STATUS_INSTALL_DIR/maple-font.sh"
+    fi
 }
 
 row_is_uninstallable() {
@@ -334,7 +381,7 @@ row_is_uninstallable() {
         code)
             [ "$path" = "$HOME/code" ] && [ -e "$HOME/code" ]
             ;;
-        gh|nvim)
+        gh|nvim|kitty)
             [ -d "$TOOL_STATUS_LOCAL_STOW_DIR/$command" ] \
                 && tool_status_path_mentions_prefix "$path" "$TOOL_STATUS_LOCAL_PREFIX"
             ;;
@@ -349,6 +396,9 @@ row_is_uninstallable() {
         tmux)
             [ -e "$TOOL_STATUS_LOCAL_BIN_DIR/tmux" ] \
                 && tool_status_path_mentions_prefix "$path" "$TOOL_STATUS_LOCAL_PREFIX"
+            ;;
+        maple)
+            [ -d "$(maple_font_dir)" ]
             ;;
         *)
             return 1

@@ -72,7 +72,7 @@ Removed commands and aliases such as `/updates`, `/install`, `/update`, `/quit`,
 
 - `.profile`, `.bashrc`, `welcome.sh`, `bootstrap.sh`: root shell entry points.
 - `.nvmrc`: repository-local canonical Node major for the welcome TUI and package metadata.
-- `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.ssh/config`: managed configuration.
+- `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.config/kitty/`, `.ssh/config`: managed configuration.
 - `scripts/lib/`: shared Bash helpers for installers, status checks, and terminal utilities.
 - `scripts/install/`: explicit installers for managed tools.
 - `scripts/tui/welcome/`: Ink welcome app, slash command metadata, JSON status exporter, and tests.

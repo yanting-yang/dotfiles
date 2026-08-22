@@ -5,7 +5,7 @@
 This repository manages personal dotfiles and shell tooling.
 
 - Root shell entry points: `.profile`, `.bashrc`, `bootstrap.sh`, `welcome.sh`; the repository-local `.nvmrc` pins the welcome TUI's Node major and is not linked into `$HOME`.
-- Configuration files: `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.ssh/config`.
+- Configuration files: `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.config/kitty/`, `.ssh/config`.
 - Shared helpers: `scripts/lib/install.sh` for installer primitives, `scripts/lib/tui.sh` for terminal UI helpers, `scripts/lib/tool_status.sh` for welcome status rows, and `scripts/lib/code.sh` for Code-running detection.
 - Installers: `scripts/install/*.sh`, which should do preflight checks and download/extract into temporary directories before mutating managed locations.
 - Welcome TUI: `scripts/tui/welcome/` contains the Ink/React app, JSON status exporter, action helpers, and tests. `welcome.sh` is the sourceable Bash bridge that launches Ink and applies mutating actions in the parent shell.

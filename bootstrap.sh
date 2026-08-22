@@ -15,6 +15,7 @@ SOURCES=(
     "$DOTFILES_DIR/.ssh/config"
     "$DOTFILES_DIR/.config/git"
     "$DOTFILES_DIR/.config/nvim"
+    "$DOTFILES_DIR/.config/kitty"
 )
 
 TARGETS=(
@@ -23,6 +24,7 @@ TARGETS=(
     "$HOME/.ssh/config"
     "$HOME/.config/git"
     "$HOME/.config/nvim"
+    "$HOME/.config/kitty"
 )
 
 BACKUP_ONLY_TARGETS=(

@@ -300,6 +300,30 @@ code_is_running() {
 welcome_run_tool_uninstaller code >/dev/null
 [ ! -e "$HOME/code" ]
 
+# The maple font row reports its marker version and uninstalls by removing the
+# managed font directory.
+maple_font_dir="$HOME/.local/share/fonts/maple"
+mkdir -p "$maple_font_dir"
+: >"$maple_font_dir/MapleMonoNF-Regular.ttf"
+printf '7.9\n' >"$maple_font_dir/.maple-version"
+
+WELCOME_UPDATE_CACHE_DIR="$TMP_DIR/status-cache" load_rows 0
+MAPLE_INDEX=-1
+for i in "${!COMMANDS[@]}"; do
+    if [ "${COMMANDS[$i]}" = "maple" ]; then
+        MAPLE_INDEX="$i"
+        break
+    fi
+done
+[ "$MAPLE_INDEX" -ge 0 ]
+[ "${PATHS[$MAPLE_INDEX]}" = "$maple_font_dir" ]
+[ "${CURRENTS[$MAPLE_INDEX]}" = "7.9" ]
+[ "${STATUSES[$MAPLE_INDEX]}" = "installed" ]
+row_is_uninstallable "$MAPLE_INDEX"
+
+welcome_run_tool_uninstaller maple >/dev/null
+[ ! -d "$maple_font_dir" ]
+
 HOME="$ORIGINAL_HOME"
 PATH="$ORIGINAL_PATH"
 if [ "$HAD_NVM_DIR" -eq 1 ]; then

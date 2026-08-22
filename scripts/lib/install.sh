@@ -40,6 +40,26 @@ download_tar_to_dir() {
     curl -fLs "$url" | tar xz "$@" -C "$target_dir"
 }
 
+download_txz_to_dir() {
+    local url="$1" target_dir="$2"
+    shift 2
+
+    require_command curl tar xz
+    mkdir -p "$target_dir"
+    curl -fLs "$url" | tar xJ "$@" -C "$target_dir"
+}
+
+download_zip_to_dir() {
+    local url="$1" target_dir="$2" archive
+
+    require_command curl unzip mktemp
+    mkdir -p "$target_dir"
+    archive=$(mktemp)
+    curl -fLs "$url" -o "$archive"
+    unzip -q -o "$archive" -d "$target_dir"
+    rm -f -- "$archive"
+}
+
 copy_dir_contents() {
     local source_dir="$1" target_dir="$2"
 

@@ -248,12 +248,28 @@ welcome_uninstall_tmux() {
     printf 'Uninstalled tmux from %s.\n' "$WELCOME_LOCAL_BIN_DIR/tmux"
 }
 
+welcome_uninstall_maple() {
+    local font_dir
+    font_dir=$(maple_font_dir)
+
+    if [ ! -d "$font_dir" ]; then
+        printf 'maple font is not installed at %s.\n' "$font_dir"
+        return 0
+    fi
+
+    welcome_remove_managed_dir "$font_dir" || return $?
+    if command -v fc-cache >/dev/null 2>&1; then
+        fc-cache -f >/dev/null 2>&1 || true
+    fi
+    printf 'Uninstalled maple font from %s.\n' "$font_dir"
+}
+
 welcome_uninstall_tool_by_command() {
     case "$1" in
         code)
             welcome_uninstall_code
             ;;
-        gh|nvim)
+        gh|nvim|kitty)
             welcome_uninstall_stow_package "$1"
             ;;
         nvm)
@@ -264,6 +280,9 @@ welcome_uninstall_tool_by_command() {
             ;;
         tmux)
             welcome_uninstall_tmux
+            ;;
+        maple)
+            welcome_uninstall_maple
             ;;
         *)
             printf 'No uninstaller is registered for %s.\n' "$1"
