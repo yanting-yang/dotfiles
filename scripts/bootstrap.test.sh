@@ -87,6 +87,7 @@ run_bootstrap() {
         FAKE_NVM_LOG="$CASE_LOG" \
         FAKE_NVM_STATE="$CASE_STATE" \
         NVM_SYMLINK_CURRENT="$CASE_NVM_SYMLINK_CURRENT" \
+        BOOTSTRAP_SKIP_SUBMODULES=1 \
         "$ROOT_DIR/bootstrap.sh" "$@"
 }
 

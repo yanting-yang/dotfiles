@@ -24,7 +24,7 @@ Welcome tests live beside the TUI implementation, and `scripts/bootstrap.test.sh
 - `node scripts/tui/welcome/cli.mjs`: run the welcome status path directly; non-TTY output prints a plain summary.
 - `source scripts/tui/nvm.sh; run_nvm_tui`: run the legacy/sourceable NVM TUI in the current shell.
 - `./bootstrap.sh --dry-run`: preview dotfile links without changing `$HOME`.
-- `./bootstrap.sh --yes`: link dotfiles into `$HOME`, ensure nvm has the Node major pinned by the repository-local `.nvmrc` without changing nvm's default alias, and run `npm ci`; `.nvmrc` itself is not linked into `$HOME`, and existing link targets are backed up under `$HOME/.dotfiles-backup/`.
+- `./bootstrap.sh --yes`: link dotfiles into `$HOME`, initialize git submodules (the vendored tmux plugins under `.config/tmux/plugins/`), ensure nvm has the Node major pinned by the repository-local `.nvmrc` without changing nvm's default alias, and run `npm ci`; `.nvmrc` itself is not linked into `$HOME`, and existing link targets are backed up under `$HOME/.dotfiles-backup/`.
 
 ## Coding Style & Naming Conventions
 
@@ -44,4 +44,4 @@ Recent commits use short imperative summaries, for example `Add nvm TUI navigati
 
 ## Safety & Configuration Tips
 
-Do not run installer scripts casually; they may download archives, replace stow packages, install Node/npm packages, or update tool versions. Keep installer network access behind explicit commands and avoid mutating install targets until downloads/extractions have succeeded. Preserve the fast local welcome and NVM paths: network checks should stay behind explicit commands such as `/check` and NVM remote refresh with `r`. Use `bootstrap.sh --dry-run` before linking real dotfiles, and keep its backup behavior intact. `bootstrap.sh --yes` may install nvm/Node and run `npm ci` so the welcome TUI works on a fresh system.
+Do not run installer scripts casually; they may download archives, replace stow packages, install Node/npm packages, or update tool versions. Keep installer network access behind explicit commands and avoid mutating install targets until downloads/extractions have succeeded. Preserve the fast local welcome and NVM paths: network checks should stay behind explicit commands such as `/check` and NVM remote refresh with `r`. Use `bootstrap.sh --dry-run` before linking real dotfiles, and keep its backup behavior intact. `bootstrap.sh --yes` may install nvm/Node, run `npm ci`, and run `git submodule update --init` so the welcome TUI and vendored tmux plugins work on a fresh system.

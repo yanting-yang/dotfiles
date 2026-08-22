@@ -170,6 +170,19 @@ welcome_dependency_status() {
     fi
 }
 
+git_submodules_status() {
+    [ -f "$DOTFILES_DIR/.gitmodules" ] || { printf 'none'; return; }
+    command -v git >/dev/null 2>&1 || { printf 'no-git'; return; }
+    git -C "$DOTFILES_DIR" rev-parse --git-dir >/dev/null 2>&1 || { printf 'no-git'; return; }
+
+    # `git submodule status` prefixes not-yet-checked-out entries with '-'.
+    if git -C "$DOTFILES_DIR" submodule status 2>/dev/null | grep -q '^-'; then
+        printf 'init'
+    else
+        printf 'ok'
+    fi
+}
+
 print_plan() {
     local i status target
     local welcome_status
@@ -201,6 +214,22 @@ print_plan() {
             ;;
         node-and-npm-ci)
             printf '  install nvm/Node %s if needed, then npm ci in %s\n' "$WELCOME_NODE_VERSION" "$DOTFILES_DIR"
+            ;;
+    esac
+
+    printf '\nGit submodules:\n'
+    case "$(git_submodules_status)" in
+        none)
+            printf '  none    no submodules registered\n'
+            ;;
+        no-git)
+            printf '  skip    %s is not a git checkout\n' "$DOTFILES_DIR"
+            ;;
+        ok)
+            printf '  ok      submodules initialized\n'
+            ;;
+        init)
+            printf '  init    git submodule update --init --recursive in %s\n' "$DOTFILES_DIR"
             ;;
     esac
 }
@@ -284,6 +313,18 @@ backup_only_targets() {
     done
 }
 
+init_submodules() {
+    [ "${BOOTSTRAP_SKIP_SUBMODULES:-0}" = "1" ] && return 0
+    [ -f "$DOTFILES_DIR/.gitmodules" ] || return 0
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$DOTFILES_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 0
+
+    printf '\nInitializing git submodules...\n'
+    if ! git -C "$DOTFILES_DIR" submodule update --init --recursive; then
+        printf 'warning: git submodule update failed; vendored plugins may be missing.\n' >&2
+    fi
+}
+
 load_or_install_welcome_node() {
     local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
     local nvm_installer="$DOTFILES_DIR/scripts/install/nvm.sh"
@@ -343,6 +384,7 @@ fi
 confirm_apply || exit 0
 apply_links
 backup_only_targets
+init_submodules
 install_welcome_deps
 
 if [ -n "$BACKUP_DIR" ]; then
