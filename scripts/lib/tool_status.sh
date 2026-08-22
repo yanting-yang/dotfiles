@@ -139,6 +139,31 @@ maple_font_version() {
     printf 'unknown'
 }
 
+catppuccin_tmux_dir() {
+    printf '%s/.config/tmux/plugins/catppuccin/tmux' "$HOME"
+}
+
+catppuccin_tmux_installed() {
+    [ -e "$1/catppuccin.tmux" ]
+}
+
+catppuccin_tmux_version() {
+    local dir="$1" tag
+
+    command -v git >/dev/null 2>&1 || { printf 'unknown'; return 0; }
+    tag=$(git -C "$dir" tag --points-at HEAD 2>/dev/null \
+        | grep -E '^v[0-9]' \
+        | sort -V \
+        | tail -1)
+    tag="${tag#v}"
+
+    if [ -n "$tag" ]; then
+        printf '%s' "$tag"
+    else
+        printf 'unknown'
+    fi
+}
+
 latest_is_newer() {
     local current="$1" latest="$2"
 
@@ -258,6 +283,7 @@ load_rows() {
     local tmux_latest tmux_current
     local kitty_latest kitty_current
     local maple_latest maple_current maple_dir
+    local catppuccin_latest catppuccin_current catppuccin_dir
     local code_bin="$HOME/code"
 
     clear_rows
@@ -289,24 +315,6 @@ load_rows() {
         add_missing_row "gh" "$gh_latest" "$TOOL_STATUS_INSTALL_DIR/gh.sh"
     fi
 
-    node_latest="$LATEST_UNCHECKED"
-    if command -v node >/dev/null 2>&1; then
-        node_current=$(node --version 2>/dev/null)
-        node_current="${node_current#v}"
-        [[ "$node_current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || node_current="unknown"
-        if [ "$include_updates" -eq 1 ]; then
-            node_major="${node_current%%.*}"
-            node_latest=""
-            if [ "$nvm_available" -eq 1 ]; then
-                node_latest=$(get_nvm_node_latest "$node_major")
-            fi
-            [ -n "$node_latest" ] || node_latest="unknown"
-        fi
-        add_cmd_row "node" "node" "$node_current" "$node_latest" ""
-    else
-        add_missing_row "node" "$node_latest"
-    fi
-
     nvim_latest="$LATEST_UNCHECKED"
     if command -v nvim >/dev/null 2>&1; then
         [ "$include_updates" -eq 1 ] && nvim_latest=$(get_github_latest https://github.com/neovim/neovim nvim)
@@ -331,6 +339,25 @@ load_rows() {
         add_missing_row "nvm" "$nvm_latest" "$TOOL_STATUS_INSTALL_DIR/nvm.sh"
     fi
 
+    # Rendered as a child of nvm in the welcome table.
+    node_latest="$LATEST_UNCHECKED"
+    if command -v node >/dev/null 2>&1; then
+        node_current=$(node --version 2>/dev/null)
+        node_current="${node_current#v}"
+        [[ "$node_current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || node_current="unknown"
+        if [ "$include_updates" -eq 1 ]; then
+            node_major="${node_current%%.*}"
+            node_latest=""
+            if [ "$nvm_available" -eq 1 ]; then
+                node_latest=$(get_nvm_node_latest "$node_major")
+            fi
+            [ -n "$node_latest" ] || node_latest="unknown"
+        fi
+        add_cmd_row "node" "node" "$node_current" "$node_latest" ""
+    else
+        add_missing_row "node" "$node_latest"
+    fi
+
     stow_latest="$LATEST_UNCHECKED"
     if command -v stow >/dev/null 2>&1; then
         [ "$include_updates" -eq 1 ] && stow_latest=$(get_stow_latest)
@@ -347,6 +374,17 @@ load_rows() {
         add_cmd_row "tmux" "tmux" "$tmux_current" "$tmux_latest" "$TOOL_STATUS_INSTALL_DIR/tmux.sh"
     else
         add_missing_row "tmux" "$tmux_latest" "$TOOL_STATUS_INSTALL_DIR/tmux.sh"
+    fi
+
+    # Rendered as a child of tmux in the welcome table.
+    catppuccin_latest="$LATEST_UNCHECKED"
+    catppuccin_dir=$(catppuccin_tmux_dir)
+    if catppuccin_tmux_installed "$catppuccin_dir"; then
+        [ "$include_updates" -eq 1 ] && catppuccin_latest=$(get_github_latest https://github.com/catppuccin/tmux catppuccin-tmux)
+        catppuccin_current=$(catppuccin_tmux_version "$catppuccin_dir")
+        add_row "cat-tmux" "$catppuccin_dir" "$catppuccin_current" "$catppuccin_latest" "$TOOL_STATUS_INSTALL_DIR/catppuccin-tmux.sh"
+    else
+        add_missing_row "cat-tmux" "$catppuccin_latest" "$TOOL_STATUS_INSTALL_DIR/catppuccin-tmux.sh"
     fi
 
     kitty_latest="$LATEST_UNCHECKED"

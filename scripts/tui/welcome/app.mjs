@@ -30,6 +30,15 @@ function statusColor(status) {
     }
 }
 
+const TOOL_LABELS = {
+    node: '└── node',
+    'cat-tmux': '└── catppuccin.tmux'
+};
+
+function toolLabel(row) {
+    return TOOL_LABELS[row.command] ?? row.command;
+}
+
 function truncate(value, width) {
     const text = String(value ?? '');
     if (text.length <= width) {
@@ -157,18 +166,19 @@ export function WelcomePanel({inputMode, width, height, rows, includeUpdates}) {
 }
 
 function ToolRows({rows, selected, width, visibleRows, showRange = true}) {
-    const pathWidth = Math.max(18, width - 52);
+    const commandWidth = Math.max(7, ...rows.map(row => toolLabel(row).length)) + 2;
+    const pathWidth = Math.max(18, width - 44 - commandWidth);
     const start = visibleWindowStart(selected, rows.length, visibleRows);
     const end = Math.min(start + visibleRows, rows.length);
     const shownRows = rows.slice(start, end);
 
     return h(Box, {flexDirection: 'column'},
-        h(Text, {bold: true}, `${' '.padEnd(2)}${'command'.padEnd(8)}${'status'.padEnd(10)}${'current'.padEnd(11)}${'latest'.padEnd(11)}path`),
+        h(Text, {bold: true}, `${' '.padEnd(2)}${'command'.padEnd(commandWidth)}${'status'.padEnd(10)}${'current'.padEnd(11)}${'latest'.padEnd(11)}path`),
         ...shownRows.map((row, offset) => {
             const index = start + offset;
             const isSelected = index === selected;
             const marker = isSelected ? '>' : ' ';
-            const prefix = `${marker} ${row.command.padEnd(8)}`;
+            const prefix = `${marker} ${toolLabel(row).padEnd(commandWidth)}`;
             const versionText = `${String(row.current).padEnd(11)}${String(row.latest).padEnd(11)}`;
 
             return h(Box, {key: row.command},

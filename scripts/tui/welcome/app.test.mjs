@@ -132,6 +132,93 @@ test('renders the welcome status rows', async () => {
     unmount();
 });
 
+test('renders catppuccin as a tmux child in the tool table', async () => {
+    const tools = {
+        kind: 'tools',
+        includeUpdates: true,
+        rows: [
+            {
+                id: 'tmux',
+                command: 'tmux',
+                path: '/usr/bin/tmux',
+                current: '3.5a',
+                latest: '3.5a',
+                status: 'current',
+                installer: '/tmp/tmux.sh',
+                actionable: false,
+                uninstallable: false
+            },
+            {
+                id: 'cat-tmux',
+                command: 'cat-tmux',
+                path: '/home/user/.config/tmux/plugins/catppuccin/tmux',
+                current: '2.3.0',
+                latest: '2.3.0',
+                status: 'current',
+                installer: '/tmp/catppuccin-tmux.sh',
+                actionable: false,
+                uninstallable: false
+            }
+        ]
+    };
+
+    const {lastFrame, unmount} = render(h(App, {
+        loaders: {loadTools: async () => tools},
+        resultFile: '',
+        actionFile: '/tmp/unused-action'
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const frame = lastFrame();
+    assert.match(frame, /^\s*>?\s*tmux\b/m);
+    assert.match(frame, /└── catppuccin\.tmux/);
+    assert.doesNotMatch(frame, /\bcat-tmux\b/);
+    unmount();
+});
+
+test('renders node as an nvm child in the tool table', async () => {
+    const tools = {
+        kind: 'tools',
+        includeUpdates: true,
+        rows: [
+            {
+                id: 'nvm',
+                command: 'nvm',
+                path: '/home/user/.config/nvm/nvm.sh (shell function)',
+                current: '0.40.3',
+                latest: '0.40.3',
+                status: 'current',
+                installer: '/tmp/nvm.sh',
+                actionable: false,
+                uninstallable: false
+            },
+            {
+                id: 'node',
+                command: 'node',
+                path: '/home/user/.config/nvm/versions/node/v24.1.0/bin/node',
+                current: '24.1.0',
+                latest: '24.2.0',
+                status: 'update',
+                installer: '',
+                actionable: true,
+                uninstallable: false
+            }
+        ]
+    };
+
+    const {lastFrame, unmount} = render(h(App, {
+        loaders: {loadTools: async () => tools},
+        resultFile: '',
+        actionFile: '/tmp/unused-action'
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const frame = lastFrame();
+    assert.match(frame, /^\s*>?\s*nvm\b/m);
+    assert.match(frame, /└── node\b/);
+    unmount();
+});
+
 test('shows only the actions available for the selected tool', async () => {
     const cases = [
         {

@@ -324,6 +324,28 @@ row_is_uninstallable "$MAPLE_INDEX"
 welcome_run_tool_uninstaller maple >/dev/null
 [ ! -d "$maple_font_dir" ]
 
+# The catppuccin/tmux plugin row is detected from the linked config tree and is
+# installable but never offers a managed uninstall action.
+catppuccin_plugin_dir="$HOME/.config/tmux/plugins/catppuccin/tmux"
+mkdir -p "$catppuccin_plugin_dir"
+: >"$catppuccin_plugin_dir/catppuccin.tmux"
+
+WELCOME_UPDATE_CACHE_DIR="$TMP_DIR/status-cache" load_rows 0
+CATPPUCCIN_INDEX=-1
+for i in "${!COMMANDS[@]}"; do
+    if [ "${COMMANDS[$i]}" = "cat-tmux" ]; then
+        CATPPUCCIN_INDEX="$i"
+        break
+    fi
+done
+[ "$CATPPUCCIN_INDEX" -ge 0 ]
+[ "${PATHS[$CATPPUCCIN_INDEX]}" = "$catppuccin_plugin_dir" ]
+[ "${STATUSES[$CATPPUCCIN_INDEX]}" = "installed" ]
+if row_is_uninstallable "$CATPPUCCIN_INDEX"; then
+    printf 'catppuccin/tmux must not expose a managed uninstall action\n' >&2
+    exit 1
+fi
+
 HOME="$ORIGINAL_HOME"
 PATH="$ORIGINAL_PATH"
 if [ "$HAD_NVM_DIR" -eq 1 ]; then
