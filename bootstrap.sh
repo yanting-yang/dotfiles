@@ -16,6 +16,7 @@ SOURCES=(
     "$DOTFILES_DIR/.config/git"
     "$DOTFILES_DIR/.config/nvim"
     "$DOTFILES_DIR/.config/kitty"
+    "$DOTFILES_DIR/.config/tmux"
 )
 
 TARGETS=(
@@ -25,6 +26,7 @@ TARGETS=(
     "$HOME/.config/git"
     "$HOME/.config/nvim"
     "$HOME/.config/kitty"
+    "$HOME/.config/tmux"
 )
 
 BACKUP_ONLY_TARGETS=(
