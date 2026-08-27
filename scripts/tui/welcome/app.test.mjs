@@ -579,26 +579,73 @@ test('backspace and Escape close the slash prompt', async () => {
 
 test('slash check updates the current table without adding a back level', async () => {
     const includeUpdates = [];
-    let actionWrites = 0;
-    const loaders = {
-        loadTools: async include => {
-            includeUpdates.push(include);
-            return {
-                kind: 'tools',
-                includeUpdates: include,
-                rows: [{
-                    id: 'gh',
-                    command: 'gh',
-                    path: '/usr/bin/gh',
-                    current: '2.0.0',
-                    latest: include ? '2.1.0' : 'unchecked',
-                    status: include ? 'update' : 'installed',
-                    installer: '/tmp/gh.sh',
-                    actionable: include,
-                    uninstallable: false
-                }]
-            };
+    const localRows = [
+        {
+            id: 'gh',
+            command: 'gh',
+            path: '/usr/bin/gh',
+            current: '2.0.0',
+            latest: 'unchecked',
+            status: 'installed',
+            installer: '/tmp/gh.sh',
+            actionable: false,
+            uninstallable: false
+        },
+        {
+            id: 'nvim',
+            command: 'nvim',
+            path: '/usr/bin/nvim',
+            current: '0.10.0',
+            latest: 'unchecked',
+            status: 'installed',
+            installer: '/tmp/nvim.sh',
+            actionable: false,
+            uninstallable: false
         }
+    ];
+    const checkedRows = [
+        {
+            ...localRows[0],
+            latest: '2.1.0',
+            status: 'update',
+            actionable: true
+        },
+        {
+            ...localRows[1],
+            latest: '0.11.0',
+            status: 'update',
+            actionable: true
+        }
+    ];
+    let resolveRemote;
+    let remoteOnRow;
+    let remoteSettled = false;
+    let actionWrites = 0;
+    const remoteLoad = new Promise(resolve => {
+        resolveRemote = resolve;
+    });
+    remoteLoad.then(() => {
+        remoteSettled = true;
+    });
+    const loaders = {
+        loadTools: async (include, onRow) => {
+            includeUpdates.push(include);
+            if (!include) {
+                return {
+                    kind: 'tools',
+                    includeUpdates: false,
+                    rows: localRows
+                };
+            }
+
+            remoteOnRow = onRow;
+            return remoteLoad;
+        }
+    };
+    const remoteResult = {
+        kind: 'tools',
+        includeUpdates: true,
+        rows: checkedRows
     };
 
     const {lastFrame, stdin, unmount} = render(h(App, {
@@ -615,12 +662,44 @@ test('slash check updates the current table without adding a back level', async 
     stdin.write('/');
     await new Promise(resolve => setTimeout(resolve, 20));
     stdin.write('\r');
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await new Promise(resolve => setTimeout(resolve, 20));
 
     assert.deepEqual(includeUpdates, [false, true]);
-    assert.match(lastFrame(), /2\.1\.0/);
-    assert.match(lastFrame(), /remote checked/);
-    assert.doesNotMatch(lastFrame(), /Back to local welcome/);
+    assert.equal(typeof remoteOnRow, 'function');
+    assert.equal(remoteSettled, false);
+
+    remoteOnRow(checkedRows[0]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    let frame = stripVTControlCharacters(lastFrame());
+    assert.match(frame, /gh\s+update\s+2\.0\.0\s+2\.1\.0/);
+    assert.match(frame, /nvim\s+installed\s+0\.10\.0\s+unchecked/);
+    assert.match(frame, /Checking latest tool versions\.\.\./);
+    assert.doesNotMatch(frame, /Latest tool versions loaded\./);
+    assert.doesNotMatch(frame, /Back to local welcome/);
+    assert.equal(remoteSettled, false);
+
+    remoteOnRow(checkedRows[1]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    frame = stripVTControlCharacters(lastFrame());
+    assert.match(frame, /gh\s+update\s+2\.0\.0\s+2\.1\.0/);
+    assert.match(frame, /nvim\s+update\s+0\.10\.0\s+0\.11\.0/);
+    assert.match(frame, /Checking latest tool versions\.\.\./);
+    assert.doesNotMatch(frame, /Latest tool versions loaded\./);
+    assert.equal(remoteSettled, false);
+
+    resolveRemote(remoteResult);
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    frame = stripVTControlCharacters(lastFrame());
+    assert.equal(remoteSettled, true);
+    assert.match(frame, /gh\s+update\s+2\.0\.0\s+2\.1\.0/);
+    assert.match(frame, /nvim\s+update\s+0\.10\.0\s+0\.11\.0/);
+    assert.doesNotMatch(frame, /Checking latest tool versions\.\.\./);
+    assert.match(frame, /Latest tool versions loaded\./);
+    assert.match(frame, /remote checked/);
+    assert.doesNotMatch(frame, /Back to local welcome/);
 
     stdin.write('q');
     await new Promise(resolve => setTimeout(resolve, 20));
@@ -628,14 +707,16 @@ test('slash check updates the current table without adding a back level', async 
     await new Promise(resolve => setTimeout(resolve, 20));
 
     assert.deepEqual(includeUpdates, [false, true]);
-    assert.match(lastFrame(), /2\.1\.0/);
-    assert.match(lastFrame(), /remote checked/);
+    frame = stripVTControlCharacters(lastFrame());
+    assert.match(frame, /2\.1\.0/);
+    assert.match(frame, /remote checked/);
 
     stdin.write('r');
     await new Promise(resolve => setTimeout(resolve, 30));
     assert.deepEqual(includeUpdates, [false, true]);
-    assert.match(lastFrame(), /2\.1\.0/);
-    assert.match(lastFrame(), /remote checked/);
+    frame = stripVTControlCharacters(lastFrame());
+    assert.match(frame, /2\.1\.0/);
+    assert.match(frame, /remote checked/);
     assert.equal(actionWrites, 0);
     unmount();
 });

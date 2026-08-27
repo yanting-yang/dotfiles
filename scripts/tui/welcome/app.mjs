@@ -73,6 +73,19 @@ function statusCounts(rows) {
     }, {});
 }
 
+function replaceToolRow(rows, row) {
+    const identity = row.id ?? row.command;
+    const index = rows.findIndex(candidate => (candidate.id ?? candidate.command) === identity);
+
+    if (index < 0) {
+        return [...rows, row];
+    }
+
+    const nextRows = [...rows];
+    nextRows[index] = row;
+    return nextRows;
+}
+
 function actionKeyRows(mode) {
     if (mode === 'slash') {
         return [
@@ -353,7 +366,10 @@ export function App({
     const refreshTools = useCallback(async (updates = includeUpdates, message = '') => {
         setBusy(updates ? 'Checking latest tool versions...' : 'Refreshing local tool status...');
         try {
-            const data = await loaders.loadTools(updates);
+            const onRow = updates
+                ? row => setToolRows(current => replaceToolRow(current, row))
+                : undefined;
+            const data = await loaders.loadTools(updates, onRow);
             setToolRows(data.rows ?? []);
             setIncludeUpdates(Boolean(data.includeUpdates));
             setToolSelected(firstToolWithAction(data.rows ?? []));

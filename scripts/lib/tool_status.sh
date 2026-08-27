@@ -17,33 +17,68 @@ INSTALLERS=()
 STATUSES=()
 
 get_github_latest() {
-    local url="$1" cache_key="${2:-github}" latest
+    local url="$1" cache_key="${2:-github}" latest release_url
 
     if tool_status_cache_read "$cache_key"; then
         return 0
     fi
     command -v curl >/dev/null 2>&1 || return 0
-    latest=$(curl -Ls -o /dev/null -w '%{url_effective}' "$url/releases/latest" 2>/dev/null) || return 0
-    latest="${latest##*/}"
+
+    # GitHub's first redirect identifies the latest full release; avoid
+    # following it and downloading the release page.
+    release_url=$(curl -fsSI -o /dev/null -w '%{redirect_url}' "$url/releases/latest" 2>/dev/null) \
+        || release_url=""
+    case "$release_url" in
+        */releases/tag/*) ;;
+        *)
+            release_url=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$url/releases/latest" 2>/dev/null) \
+                || return 0
+            ;;
+    esac
+    case "$release_url" in
+        */releases/tag/*) latest="${release_url##*/}" ;;
+        *) return 0 ;;
+    esac
     latest="${latest#v}"
 
-    if [ -n "$latest" ] && [ "$latest" != "latest" ]; then
+    if [ -n "$latest" ]; then
         tool_status_cache_write "$cache_key" "$latest"
         printf '%s' "$latest"
     fi
 }
 
 get_stow_latest() {
-    local latest
+    local latest refs
 
     if tool_status_cache_read stow; then
         return 0
     fi
-    command -v git >/dev/null 2>&1 || return 0
-    latest=$(git ls-remote --tags --refs https://github.com/aspiers/stow.git 'v*' 2>/dev/null \
-        | sed -n 's|.*refs/tags/v\([0-9][0-9.]*\)$|\1|p' \
-        | sort -V \
-        | tail -1)
+
+    latest=""
+    if command -v curl >/dev/null 2>&1; then
+        # Stow has tags but no GitHub releases. The matching-refs endpoint is
+        # quicker than Git's ref advertisement; git remains the rate-limit fallback.
+        refs=$(curl -fsSL \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/aspiers/stow/git/matching-refs/tags/v \
+            2>/dev/null) || refs=""
+        if [ -n "$refs" ]; then
+            latest=$(printf '%s\n' "$refs" \
+                | grep -oE '"ref"[[:space:]]*:[[:space:]]*"refs/tags/v[0-9.]+"' \
+                | sed 's|.*refs/tags/\([^"]*\)"|\1|' \
+                | grep -E '^v[0-9]+(\.[0-9]+)+$' \
+                | sort -V \
+                | tail -1) || latest=""
+            latest="${latest#v}"
+        fi
+    fi
+
+    if [ -z "$latest" ] && command -v git >/dev/null 2>&1; then
+        latest=$(git ls-remote --tags --refs https://github.com/aspiers/stow.git 'v*' 2>/dev/null \
+            | sed -n 's|.*refs/tags/v\([0-9][0-9.]*\)$|\1|p' \
+            | sort -V \
+            | tail -1) || latest=""
+    fi
 
     if [ -n "$latest" ]; then
         tool_status_cache_write stow "$latest"
@@ -52,7 +87,7 @@ get_stow_latest() {
 }
 
 get_nvm_node_latest() {
-    local major="$1" cache_key="node-$1" latest
+    local major="$1" cache_key="node-$1" index latest manifest mirror
 
     if tool_status_cache_read "$cache_key"; then
         return 0
@@ -60,8 +95,41 @@ get_nvm_node_latest() {
     [[ "$major" =~ ^[1-9][0-9]*$ ]] || return 0
     command -v nvm >/dev/null 2>&1 || return 0
 
-    latest=$(NVM_VERSION_ONLY=1 nvm version-remote "$major" 2>/dev/null) || return 0
-    latest="${latest#v}"
+    latest=""
+    if command -v nvm_get_mirror >/dev/null 2>&1 \
+        && command -v nvm_download >/dev/null 2>&1; then
+        mirror=$(nvm_get_mirror node std 2>/dev/null) || mirror=""
+        mirror="${mirror%/}"
+        if [ -n "$mirror" ]; then
+            # The small per-major checksum prefix contains the release version
+            # and avoids nvm parsing the complete catalog and refreshing aliases.
+            manifest=$(nvm_download -L -s \
+                --header 'Range: bytes=0-255' \
+                "$mirror/latest-v${major}.x/SHASUMS256.txt" \
+                -o - 2>/dev/null) || manifest=""
+            if [[ "$manifest" =~ ^[[:xdigit:]]{64}[[:space:]]+node-v(${major}\.[0-9]+\.[0-9]+)- ]]; then
+                latest="${BASH_REMATCH[1]}"
+            fi
+
+            if [ -z "$latest" ]; then
+                index=$(nvm_download -L -s "$mirror/index.tab" -o - 2>/dev/null) || index=""
+                latest=$(printf '%s\n' "$index" \
+                    | awk -v prefix="v${major}." '
+                        NR > 1 && index($1, prefix) == 1 && $1 ~ /^v[0-9]+\.[0-9]+\.[0-9]+$/ {
+                            sub(/^v/, "", $1)
+                            print $1
+                        }
+                    ' \
+                    | sort -V \
+                    | tail -1) || latest=""
+            fi
+        fi
+    fi
+
+    if ! [[ "$latest" =~ ^${major}\.[0-9]+\.[0-9]+$ ]]; then
+        latest=$(NVM_VERSION_ONLY=1 nvm version-remote "$major" 2>/dev/null) || return 0
+        latest="${latest#v}"
+    fi
     [[ "$latest" =~ ^${major}\.[0-9]+\.[0-9]+$ ]] || return 0
 
     tool_status_cache_write "$cache_key" "$latest"
@@ -230,7 +298,7 @@ clear_rows() {
 
 add_row() {
     local command="$1" path="$2" current="${3:-unknown}" latest="${4:-unknown}" installer="${5:-}"
-    local status
+    local index status
 
     [ -n "$current" ] || current="unknown"
     [ -n "$latest" ] || latest="unknown"
@@ -242,6 +310,11 @@ add_row() {
     LATESTS+=("$latest")
     INSTALLERS+=("$installer")
     STATUSES+=("$status")
+
+    if [ -n "${TOOL_STATUS_ROW_CALLBACK:-}" ]; then
+        index=$((${#COMMANDS[@]} - 1))
+        "$TOOL_STATUS_ROW_CALLBACK" "$index"
+    fi
 }
 
 add_missing_row() {
@@ -274,6 +347,7 @@ tool_status_path_mentions_prefix() {
 
 load_rows() {
     local include_updates="${1:-0}"
+    local TOOL_STATUS_ROW_CALLBACK="${2:-}"
     local code_latest code_current
     local gh_latest gh_current
     local node_latest node_current node_major

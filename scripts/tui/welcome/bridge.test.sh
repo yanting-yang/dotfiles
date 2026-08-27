@@ -165,6 +165,122 @@ direct_output=$(WELCOME_SH_NO_AUTO_RUN=0 \
     bash "$ROOT_DIR/welcome.sh")
 grep -Fq 'direct welcome app launched' <<<"$direct_output"
 
+# Remote version helpers should prefer their single-request paths, cache valid
+# results, and retain their slower fallbacks for unusual remote responses.
+mkdir -p "$TMP_DIR/latest-bin"
+cat >"$TMP_DIR/latest-bin/curl" <<'SCRIPT'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STATUS_LATEST_CURL_LOG"
+
+case "${STATUS_LATEST_CURL_MODE:-}" in
+    github-direct)
+        printf 'https://github.com/example/project/releases/tag/v1.2.3'
+        ;;
+    github-fallback)
+        case "$*" in
+            -fsSIL*) printf 'https://github.com/example/project/releases/tag/v2.3.4' ;;
+            -fsSI*) printf 'https://github.com/example/project/releases/latest' ;;
+            *) exit 91 ;;
+        esac
+        ;;
+    stow-api)
+        printf '%s\n' \
+            '[' \
+            '  {"ref":"refs/tags/v2.3.1"},' \
+            '  {"ref": "refs/tags/v2.4.1"},' \
+            '  {"ref":"refs/tags/v2.5.0-beta.1"}' \
+            ']'
+        ;;
+    stow-fallback)
+        exit 22
+        ;;
+    *)
+        exit 92
+        ;;
+esac
+SCRIPT
+cat >"$TMP_DIR/latest-bin/git" <<'SCRIPT'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STATUS_LATEST_GIT_LOG"
+
+case "${STATUS_LATEST_GIT_MODE:-}" in
+    stow-fallback)
+        printf '%s\n' \
+            '1111111111111111111111111111111111111111 refs/tags/v2.3.1' \
+            '2222222222222222222222222222222222222222 refs/tags/v2.4.0' \
+            '3333333333333333333333333333333333333333 refs/tags/v2.5.0-beta.1'
+        ;;
+    *)
+        exit 93
+        ;;
+esac
+SCRIPT
+chmod +x "$TMP_DIR/latest-bin/curl" "$TMP_DIR/latest-bin/git"
+
+(
+    PATH="$TMP_DIR/latest-bin:$ORIGINAL_PATH"
+    STATUS_LATEST_CURL_LOG="$TMP_DIR/latest-curl.log"
+    STATUS_LATEST_GIT_LOG="$TMP_DIR/latest-git.log"
+    export PATH STATUS_LATEST_CURL_LOG STATUS_LATEST_GIT_LOG
+
+    github_cache="$TMP_DIR/github-direct-cache"
+    mkdir -p "$github_cache"
+    : >"$STATUS_LATEST_CURL_LOG"
+    : >"$STATUS_LATEST_GIT_LOG"
+    STATUS_LATEST_CURL_MODE=github-direct
+    export STATUS_LATEST_CURL_MODE
+    github_latest=$(WELCOME_UPDATE_CACHE_DIR="$github_cache" \
+        get_github_latest https://github.com/example/project github-direct)
+    [ "$github_latest" = "1.2.3" ]
+    [ "$(sed -n '1p' "$STATUS_LATEST_CURL_LOG")" = \
+        '-fsSI -o /dev/null -w %{redirect_url} https://github.com/example/project/releases/latest' ]
+    [ "$(wc -l <"$STATUS_LATEST_CURL_LOG")" -eq 1 ]
+    IFS= read -r github_cached <"$github_cache/github-direct.latest"
+    [ "$github_cached" = "1.2.3" ]
+
+    github_latest=$(WELCOME_UPDATE_CACHE_DIR="$github_cache" \
+        get_github_latest https://github.com/example/project github-direct)
+    [ "$github_latest" = "1.2.3" ]
+    [ "$(wc -l <"$STATUS_LATEST_CURL_LOG")" -eq 1 ]
+
+    : >"$STATUS_LATEST_CURL_LOG"
+    STATUS_LATEST_CURL_MODE=github-fallback
+    export STATUS_LATEST_CURL_MODE
+    github_latest=$(WELCOME_UPDATE_CACHE_DIR= \
+        get_github_latest https://github.com/example/project github-fallback)
+    [ "$github_latest" = "2.3.4" ]
+    mapfile -t github_fallback_calls <"$STATUS_LATEST_CURL_LOG"
+    [ "${#github_fallback_calls[@]}" -eq 2 ]
+    [ "${github_fallback_calls[0]}" = \
+        '-fsSI -o /dev/null -w %{redirect_url} https://github.com/example/project/releases/latest' ]
+    [ "${github_fallback_calls[1]}" = \
+        '-fsSIL -o /dev/null -w %{url_effective} https://github.com/example/project/releases/latest' ]
+
+    : >"$STATUS_LATEST_CURL_LOG"
+    : >"$STATUS_LATEST_GIT_LOG"
+    STATUS_LATEST_CURL_MODE=stow-api
+    STATUS_LATEST_GIT_MODE=stow-api
+    export STATUS_LATEST_CURL_MODE STATUS_LATEST_GIT_MODE
+    stow_latest=$(WELCOME_UPDATE_CACHE_DIR= get_stow_latest)
+    [ "$stow_latest" = "2.4.1" ]
+    [ "$(sed -n '1p' "$STATUS_LATEST_CURL_LOG")" = \
+        '-fsSL -H Accept: application/vnd.github+json https://api.github.com/repos/aspiers/stow/git/matching-refs/tags/v' ]
+    [ "$(wc -l <"$STATUS_LATEST_CURL_LOG")" -eq 1 ]
+    [ ! -s "$STATUS_LATEST_GIT_LOG" ]
+
+    : >"$STATUS_LATEST_CURL_LOG"
+    : >"$STATUS_LATEST_GIT_LOG"
+    STATUS_LATEST_CURL_MODE=stow-fallback
+    STATUS_LATEST_GIT_MODE=stow-fallback
+    export STATUS_LATEST_CURL_MODE STATUS_LATEST_GIT_MODE
+    stow_latest=$(WELCOME_UPDATE_CACHE_DIR= get_stow_latest)
+    [ "$stow_latest" = "2.4.0" ]
+    [ "$(wc -l <"$STATUS_LATEST_CURL_LOG")" -eq 1 ]
+    [ "$(sed -n '1p' "$STATUS_LATEST_GIT_LOG")" = \
+        'ls-remote --tags --refs https://github.com/aspiers/stow.git v*' ]
+    [ "$(wc -l <"$STATUS_LATEST_GIT_LOG")" -eq 1 ]
+)
+
 mkdir -p "$TMP_DIR/home" "$TMP_DIR/bin"
 HOME="$TMP_DIR/home"
 NVM_DIR="$TMP_DIR/nvm"
@@ -183,10 +299,144 @@ get_stow_latest() {
 load_rows 1
 [ "$update_checks" -eq 0 ]
 
+# Row callbacks must observe each completed row as it is appended, in table
+# order. Use two installed-tool stubs so the first events also prove that a
+# retrieved remote version and its derived status are available immediately.
+PATH="$ORIGINAL_PATH"
+cat >"$HOME/code" <<'SCRIPT'
+#!/bin/sh
+printf 'code 1.0.0\n'
+SCRIPT
+cat >"$TMP_DIR/bin/gh" <<'SCRIPT'
+#!/bin/sh
+if [ "${1:-}" = "--version" ]; then
+    printf 'gh version 2.0.0\n'
+fi
+SCRIPT
+chmod +x "$HOME/code" "$TMP_DIR/bin/gh"
+ln -s "$(command -v awk)" "$TMP_DIR/bin/awk"
+ln -s "$(command -v head)" "$TMP_DIR/bin/head"
+PATH="$TMP_DIR/bin"
+
+STATUS_ROW_CALLBACK_LOG="$TMP_DIR/status-row-callback.log"
+STATUS_REMOTE_CHECK_LOG="$TMP_DIR/status-remote-check.log"
+
+get_github_latest() {
+    local cache_key="$2"
+
+    printf '%s\n' "$cache_key" >>"$STATUS_REMOTE_CHECK_LOG"
+    case "$cache_key" in
+        code) printf '1.1.0' ;;
+        gh) printf '2.1.0' ;;
+        *) printf '9.9.9' ;;
+    esac
+}
+
+status_record_completed_row() {
+    local index="$1" row_count="${#COMMANDS[@]}"
+
+    [ "$index" -eq $((row_count - 1)) ]
+    [ "${#PATHS[@]}" -eq "$row_count" ]
+    [ "${#CURRENTS[@]}" -eq "$row_count" ]
+    [ "${#LATESTS[@]}" -eq "$row_count" ]
+    [ "${#INSTALLERS[@]}" -eq "$row_count" ]
+    [ "${#STATUSES[@]}" -eq "$row_count" ]
+    printf '%s|%s|%s|%s\n' \
+        "$row_count" "${COMMANDS[$index]}" "${LATESTS[$index]}" "${STATUSES[$index]}" \
+        >>"$STATUS_ROW_CALLBACK_LOG"
+}
+
+: >"$STATUS_ROW_CALLBACK_LOG"
+: >"$STATUS_REMOTE_CHECK_LOG"
+load_rows 1 status_record_completed_row
+
+mapfile -t status_callback_rows <"$STATUS_ROW_CALLBACK_LOG"
+expected_callback_commands=(code gh nvim nvm node stow tmux cat-tmux kitty maple)
+[ "${#status_callback_rows[@]}" -eq "${#expected_callback_commands[@]}" ]
+for i in "${!expected_callback_commands[@]}"; do
+    IFS='|' read -r callback_count callback_command callback_latest callback_status \
+        <<<"${status_callback_rows[$i]}"
+    [ "$callback_count" -eq $((i + 1)) ]
+    [ "$callback_command" = "${expected_callback_commands[$i]}" ]
+done
+[ "${status_callback_rows[0]}" = '1|code|1.1.0|update' ]
+[ "${status_callback_rows[1]}" = '2|gh|2.1.0|update' ]
+mapfile -t status_remote_checks <"$STATUS_REMOTE_CHECK_LOG"
+[ "${status_remote_checks[*]}" = 'code gh' ]
+
+# Omitting the callback retains the one-shot local behavior, does not leak the
+# previous callback, and does not perform remote checks.
+: >"$STATUS_ROW_CALLBACK_LOG"
+: >"$STATUS_REMOTE_CHECK_LOG"
+load_rows 0
+[ ! -s "$STATUS_ROW_CALLBACK_LOG" ]
+[ ! -s "$STATUS_REMOTE_CHECK_LOG" ]
+[ "${COMMANDS[0]}|${LATESTS[0]}|${STATUSES[0]}" = 'code|unchecked|installed' ]
+[ "${COMMANDS[1]}|${LATESTS[1]}|${STATUSES[1]}" = 'gh|unchecked|installed' ]
+
+# The real status exporter must forward those callbacks as newline-delimited
+# events instead of buffering until every row is ready. Keep the subprocess
+# offline with a curl stub and a PATH containing only the intended fixtures.
+PATH="$ORIGINAL_PATH"
+ln -s "$(PATH="$ORIGINAL_PATH" command -v dirname)" "$TMP_DIR/bin/dirname"
+ln -s "$(PATH="$ORIGINAL_PATH" command -v readlink)" "$TMP_DIR/bin/readlink"
+STATUS_STREAM_CURL_LOG="$TMP_DIR/status-stream-curl.log"
+: >"$STATUS_STREAM_CURL_LOG"
+cat >"$TMP_DIR/bin/curl" <<'SCRIPT'
+#!/bin/sh
+printf '%s\n' "$*" >>"$STATUS_STREAM_CURL_LOG"
+case "$*" in
+    '-fsSI -o /dev/null -w %{redirect_url} https://github.com/microsoft/vscode/releases/latest')
+        printf 'https://github.com/microsoft/vscode/releases/tag/v1.1.0'
+        ;;
+    '-fsSI -o /dev/null -w %{redirect_url} https://github.com/cli/cli/releases/latest')
+        printf 'https://github.com/cli/cli/releases/tag/v2.1.0'
+        ;;
+    *) exit 91 ;;
+esac
+SCRIPT
+chmod +x "$TMP_DIR/bin/curl"
+
+mapfile -t status_stream_events < <(
+    HOME="$HOME" \
+        NVM_DIR="$NVM_DIR" \
+        PATH="$TMP_DIR/bin" \
+        STATUS_STREAM_CURL_LOG="$STATUS_STREAM_CURL_LOG" \
+        WELCOME_UPDATE_CACHE_DIR= \
+        /bin/bash "$ROOT_DIR/scripts/tui/welcome/status.sh" tools --updates --stream
+)
+[ "${#status_stream_events[@]}" -eq 11 ]
+for i in {0..9}; do
+    [[ "${status_stream_events[$i]}" == '{"kind":"tool-row","row":'* ]]
+done
+[[ "${status_stream_events[0]}" == *'"command":"code"'* ]]
+[[ "${status_stream_events[0]}" == *'"latest":"1.1.0"'* ]]
+[[ "${status_stream_events[0]}" == *'"status":"update"'* ]]
+[[ "${status_stream_events[1]}" == *'"command":"gh"'* ]]
+[[ "${status_stream_events[1]}" == *'"latest":"2.1.0"'* ]]
+[ "${status_stream_events[10]}" = '{"kind":"tools-complete","includeUpdates":true}' ]
+mapfile -t status_stream_curl_calls <"$STATUS_STREAM_CURL_LOG"
+[ "${#status_stream_curl_calls[@]}" -eq 2 ]
+[ "${status_stream_curl_calls[0]}" = \
+    '-fsSI -o /dev/null -w %{redirect_url} https://github.com/microsoft/vscode/releases/latest' ]
+[ "${status_stream_curl_calls[1]}" = \
+    '-fsSI -o /dev/null -w %{redirect_url} https://github.com/cli/cli/releases/latest' ]
+
+status_local_json=$(
+    HOME="$HOME" \
+        NVM_DIR="$NVM_DIR" \
+        PATH="$TMP_DIR/bin" \
+        STATUS_STREAM_CURL_LOG="$STATUS_STREAM_CURL_LOG" \
+        WELCOME_UPDATE_CACHE_DIR= \
+        /bin/bash "$ROOT_DIR/scripts/tui/welcome/status.sh" tools --local
+)
+[[ "$status_local_json" == '{"kind":"tools","includeUpdates":false,"rows":['* ]]
+[[ "$status_local_json" != *$'\n'* ]]
+
 # Exercise Node's real status-row path before the action tests replace
 # load_rows with focused fixtures.
 PATH="$ORIGINAL_PATH"
-mkdir -p "$NVM_DIR" "$TMP_DIR/status-cache"
+mkdir -p "$NVM_DIR" "$TMP_DIR/status-cache" "$TMP_DIR/status-fast-cache"
 cat >"$TMP_DIR/bin/node" <<'SCRIPT'
 #!/bin/sh
 if [ "${1:-}" = "--version" ]; then
@@ -217,6 +467,29 @@ nvm() {
             return 92
             ;;
     esac
+}
+
+nvm_get_mirror() {
+    if [ -n "${STATUS_NVM_LOG:-}" ]; then
+        printf 'get-mirror:%s\n' "$*" >>"$STATUS_NVM_LOG"
+    fi
+
+    [ "${STATUS_NVM_FAST_PATH:-0}" -eq 1 ] || return 96
+    [ "$*" = "node std" ] || return 97
+    printf 'https://nodejs.org/dist/'
+}
+
+nvm_download() {
+    if [ -n "${STATUS_NVM_LOG:-}" ]; then
+        printf 'download:%s\n' "$*" >>"$STATUS_NVM_LOG"
+    fi
+
+    [ "${STATUS_NVM_FAST_PATH:-0}" -eq 1 ] || return 98
+    [ "$*" = \
+        "-L -s --header Range: bytes=0-255 https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt -o -" ] \
+        || return 99
+    printf '%s\n' \
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  node-v24.3.0-linux-x64.tar.xz'
 }
 SCRIPT
 PATH="$TMP_DIR/bin"
@@ -265,6 +538,19 @@ if row_is_actionable "$STATUS_NODE_INDEX"; then
     exit 1
 fi
 
+STATUS_NVM_FAST_PATH=1
+WELCOME_UPDATE_CACHE_DIR="$TMP_DIR/status-fast-cache" load_rows 1
+status_assert_node_row 24.3.0 update
+status_assert_node_remote_calls 0
+PATH="$ORIGINAL_PATH" grep -Fxq 'get-mirror:node std' "$STATUS_NVM_LOG"
+PATH="$ORIGINAL_PATH" grep -Fxq \
+    'download:-L -s --header Range: bytes=0-255 https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt -o -' \
+    "$STATUS_NVM_LOG"
+[ "$(PATH="$ORIGINAL_PATH" grep -c '^download:' "$STATUS_NVM_LOG")" -eq 1 ]
+IFS= read -r cached_fast_node_latest <"$TMP_DIR/status-fast-cache/node-24.latest"
+[ "$cached_fast_node_latest" = "24.3.0" ]
+
+STATUS_NVM_FAST_PATH=0
 WELCOME_UPDATE_CACHE_DIR="$TMP_DIR/status-cache" load_rows 1
 status_assert_node_row 24.2.0 update
 status_assert_node_remote_calls 1
