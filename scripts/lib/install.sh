@@ -87,6 +87,19 @@ latest_github_tag() {
     printf '%s' "$latest"
 }
 
+latest_git_tag() {
+    local repo_url="$1" latest
+
+    require_command git
+    latest=$(git ls-remote --tags --refs "$repo_url" 'v*' 2>/dev/null \
+        | sed -n 's|.*refs/tags/\(v[0-9][0-9.]*\)$|\1|p' \
+        | sort -V \
+        | tail -1)
+
+    [ -n "$latest" ] || die "could not resolve latest tag for $repo_url"
+    printf '%s' "$latest"
+}
+
 stow_package_dir() {
     printf '%s/%s' "$LOCAL_STOW_DIR" "$1"
 }

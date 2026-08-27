@@ -39,9 +39,9 @@ get_stow_latest() {
     if tool_status_cache_read stow; then
         return 0
     fi
-    command -v curl >/dev/null 2>&1 || return 0
-    latest=$(curl -Ls https://ftp.gnu.org/gnu/stow/ 2>/dev/null \
-        | sed -n 's/.*stow-\([0-9][0-9.]*\)\.tar\.gz.*/\1/p' \
+    command -v git >/dev/null 2>&1 || return 0
+    latest=$(git ls-remote --tags --refs https://github.com/aspiers/stow.git 'v*' 2>/dev/null \
+        | sed -n 's|.*refs/tags/v\([0-9][0-9.]*\)$|\1|p' \
         | sort -V \
         | tail -1)
 
