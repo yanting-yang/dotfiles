@@ -20,6 +20,11 @@ Apply the links:
 legacy `.lesshst`, `.bash_history`, and `.bash_logout` files under
 `$HOME/.dotfiles-backup/`, and prepares the Ink-based welcome TUI. On a new system it
 may install or activate nvm/Node and then run `npm ci` in this repository.
+The `.ssh` directory is a private submodule, so applying the bootstrap requires
+authenticated access to `ssh-config`. A dry run stays offline; after confirmation,
+Bootstrap initializes the private submodule before changing managed dotfiles under
+`$HOME`. Authenticate the transport used to clone this repository first; for HTTPS,
+`gh auth login` followed by `gh auth setup-git` configures Git access.
 
 The welcome TUI's Node major is pinned in the repository-local `.nvmrc`; Bootstrap
 does not link it to `$HOME`. Bootstrap ensures that nvm has a compatible runtime for
@@ -72,7 +77,8 @@ Removed commands and aliases such as `/updates`, `/install`, `/update`, `/quit`,
 
 - `.profile`, `.bashrc`, `welcome.sh`, `bootstrap.sh`: root shell entry points.
 - `.nvmrc`: repository-local canonical Node major for the welcome TUI and package metadata.
-- `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.config/kitty/`, `.config/tmux/`, `.ssh/config`: managed configuration.
+- `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.config/kitty/`, `.config/tmux/`: public managed configuration.
+- `.ssh/`: private `ssh-config` submodule containing the managed SSH configuration.
 - `scripts/lib/`: shared Bash helpers for installers, status checks, and terminal utilities.
 - `scripts/install/`: explicit installers for managed tools.
 - `scripts/tui/welcome/`: Ink welcome app, slash command metadata, JSON status exporter, and tests.

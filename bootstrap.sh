@@ -5,6 +5,8 @@ DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DRY_RUN=0
 YES=0
 BACKUP_DIR=""
+SSH_SUBMODULE_PATH=".ssh"
+SSH_CONFIG_SOURCE="$DOTFILES_DIR/$SSH_SUBMODULE_PATH/config"
 
 # shellcheck source=scripts/lib/node.sh
 source "$DOTFILES_DIR/scripts/lib/node.sh"
@@ -12,7 +14,7 @@ source "$DOTFILES_DIR/scripts/lib/node.sh"
 SOURCES=(
     "$DOTFILES_DIR/.profile"
     "$DOTFILES_DIR/.bashrc"
-    "$DOTFILES_DIR/.ssh/config"
+    "$SSH_CONFIG_SOURCE"
     "$DOTFILES_DIR/.config/git"
     "$DOTFILES_DIR/.config/nvim"
     "$DOTFILES_DIR/.config/kitty"
@@ -117,11 +119,26 @@ target_status() {
     fi
 }
 
+ssh_submodule_needs_init() {
+    [ -f "$DOTFILES_DIR/.gitmodules" ] || return 1
+    command -v git >/dev/null 2>&1 || return 1
+    git -C "$DOTFILES_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 1
+    git -C "$DOTFILES_DIR" submodule status -- "$SSH_SUBMODULE_PATH" 2>/dev/null \
+        | grep -q '^-'
+}
+
 validate_sources() {
-    local source
+    local allow_pending_ssh="${1:-0}" source
 
     for source in "${SOURCES[@]}"; do
-        [ -e "$source" ] || die "missing source: $source"
+        if [ ! -e "$source" ]; then
+            if [ "$allow_pending_ssh" -eq 1 ] \
+                && [ "$source" = "$SSH_CONFIG_SOURCE" ] \
+                && ssh_submodule_needs_init; then
+                continue
+            fi
+            die "missing source: $source"
+        fi
     done
 
     [ -f "$DOTFILES_DIR/package.json" ] || die "missing source: $DOTFILES_DIR/package.json"
@@ -325,6 +342,16 @@ init_submodules() {
     fi
 }
 
+init_required_ssh_submodule() {
+    [ "${BOOTSTRAP_SKIP_SUBMODULES:-0}" = "1" ] && return 0
+    ssh_submodule_needs_init || return 0
+
+    printf '\nInitializing private SSH configuration...\n'
+    if ! git -C "$DOTFILES_DIR" submodule update --init --recursive -- "$SSH_SUBMODULE_PATH"; then
+        die "failed to initialize private .ssh submodule; verify access to ssh-config"
+    fi
+}
+
 load_or_install_welcome_node() {
     local nvm_dir="${NVM_DIR:-$HOME/.config/nvm}"
     local nvm_installer="$DOTFILES_DIR/scripts/install/nvm.sh"
@@ -373,7 +400,7 @@ install_welcome_deps() {
     npm --prefix "$DOTFILES_DIR" ci
 }
 
-validate_sources
+validate_sources 1
 print_plan
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -382,6 +409,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 confirm_apply || exit 0
+init_required_ssh_submodule
+validate_sources
 apply_links
 backup_only_targets
 init_submodules

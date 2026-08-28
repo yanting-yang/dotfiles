@@ -7,3 +7,6 @@
 [submodule ".config/tmux/plugins/tmux-plugins/tmux-battery"]
 	path = .config/tmux/plugins/tmux-plugins/tmux-battery
 	url = https://github.com/tmux-plugins/tmux-battery
+[submodule ".ssh"]
+	path = .ssh
+	url = ../ssh-config.git
