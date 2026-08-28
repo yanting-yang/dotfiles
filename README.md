@@ -22,9 +22,20 @@ legacy `.profile`, `.lesshst`, `.bash_history`, and `.bash_logout` files under
 may install or activate nvm/Node and then run `npm ci` in this repository.
 The `.ssh` directory is a private submodule, so applying the bootstrap requires
 authenticated access to `ssh-config`. A dry run stays offline; after confirmation,
-Bootstrap initializes the private submodule before changing managed dotfiles under
-`$HOME`. Authenticate the transport used to clone this repository first; for HTTPS,
-`gh auth login` followed by `gh auth setup-git` configures Git access.
+Bootstrap authenticates GitHub and initializes the private submodule before changing
+managed dotfiles under `$HOME`.
+
+When the submodule resolves to an `https://github.com/` URL, Bootstrap arranges those
+credentials itself instead of letting Git fall back to a user name and password prompt
+GitHub no longer accepts. It uses `GH_TOKEN` or `GITHUB_TOKEN` when either is set;
+otherwise it installs `gh` into `~/.local` if needed and runs `gh auth login`, which
+requires a terminal on both standard input and output. The credentials are passed
+directly to the clone, so `gh auth setup-git` is not needed and the managed
+`.config/git/config` still supplies the helper for everyday use afterwards. Set
+`BOOTSTRAP_SKIP_GITHUB_AUTH=1` to skip this and clone with your own Git credentials,
+which is also what happens when the submodule uses SSH or a non-GitHub host. The
+plan section reads local `gh` state only, so `--dry-run` neither installs nor signs
+in to anything.
 
 On the first apply, Bootstrap uses `tzselect` to create a private, machine-local
 `~/local.sh` containing `TZ`; `.bashrc` sources that file for interactive shells.
@@ -43,8 +54,12 @@ For an unattended first apply, provide all local values explicitly:
 BOOTSTRAP_TZ=Etc/UTC \
 BOOTSTRAP_GIT_NAME='Example User' \
 BOOTSTRAP_GIT_EMAIL='user@example.com' \
+GH_TOKEN=ghp_example \
 ./bootstrap.sh --yes
 ```
+
+`GH_TOKEN` is only needed while `.ssh` is still uncloned; later runs skip the GitHub
+stage entirely.
 
 The welcome TUI's Node major is pinned in the repository-local `.nvmrc`; Bootstrap
 does not link it to `$HOME`. Bootstrap ensures that nvm has a compatible runtime for
@@ -135,11 +150,17 @@ tmp_home=$(mktemp -d)
 BOOTSTRAP_TZ=Etc/UTC \
 BOOTSTRAP_GIT_NAME='Bootstrap Test' \
 BOOTSTRAP_GIT_EMAIL='bootstrap@example.com' \
+BOOTSTRAP_SKIP_GITHUB_AUTH=1 \
 HOME="$tmp_home" ./bootstrap.sh --yes
 ```
+
+`BOOTSTRAP_SKIP_GITHUB_AUTH=1` keeps the smoke test from installing `gh` into the
+temporary home; drop it only when you mean to exercise that path.
 
 ## Safety
 
 Installer scripts may download archives, replace stow packages, or update tool versions.
-Remote version checks should stay behind explicit user actions such as `/check` and
-NVM remote refresh with `r`. Use `./bootstrap.sh --dry-run` before linking real dotfiles.
+A first apply may also install `gh` (and, transitively, stow) under `~/.local` before
+cloning the private `.ssh` submodule. Remote version checks should stay behind explicit
+user actions such as `/check` and NVM remote refresh with `r`. Use
+`./bootstrap.sh --dry-run` before linking real dotfiles.

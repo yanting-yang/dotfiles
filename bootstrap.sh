@@ -14,6 +14,9 @@ GIT_LOCAL_CONFIG="$GIT_CONFIG_DIR/local"
 LEGACY_GIT_CONFIG="$HOME/.gitconfig"
 SSH_SUBMODULE_PATH=".ssh"
 SSH_CONFIG_SOURCE="$DOTFILES_DIR/$SSH_SUBMODULE_PATH/config"
+LOCAL_BIN_DIR="${LOCAL_PREFIX:-$HOME/.local}/bin"
+GH_BIN=""
+SSH_SUBMODULE_GIT_ARGS=()
 CREATE_SHELL_LOCAL_CONFIG=0
 CREATE_GIT_LOCAL_CONFIG=0
 SELECTED_TIMEZONE=""
@@ -58,6 +61,10 @@ usage() {
     printf '  BOOTSTRAP_TZ          timezone for unattended local.sh creation\n'
     printf '  BOOTSTRAP_GIT_NAME    Git user name for unattended identity creation\n'
     printf '  BOOTSTRAP_GIT_EMAIL   Git user email for unattended identity creation\n'
+    printf '  GH_TOKEN              GitHub token used instead of gh for the private submodule\n'
+    printf '  GITHUB_TOKEN          GitHub token used when GH_TOKEN is unset\n'
+    printf '  BOOTSTRAP_SKIP_GITHUB_AUTH  clone the private submodule with your own Git credentials\n'
+    printf '  BOOTSTRAP_SKIP_SUBMODULES   skip all git submodule initialization\n'
     printf '  WELCOME_NODE_VERSION  Node major/version to install with nvm when needed [%s]\n' "$WELCOME_NODE_VERSION"
 }
 
@@ -402,6 +409,137 @@ ssh_submodule_needs_init() {
         | grep -q '^-'
 }
 
+# Resolve a relative submodule URL the way git does: each leading '../' drops one
+# component from the superproject remote, and './' keeps it.
+resolve_relative_git_url() {
+    local base="${1%/}" relative="$2"
+
+    while :; do
+        case "$relative" in
+            ./*)
+                relative="${relative#./}"
+                ;;
+            ../*)
+                relative="${relative#../}"
+                base="${base%/*}"
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    printf '%s/%s' "$base" "$relative"
+}
+
+private_submodule_url() {
+    local origin url
+
+    [ -f "$DOTFILES_DIR/.gitmodules" ] || return 1
+    command -v git >/dev/null 2>&1 || return 1
+    git -C "$DOTFILES_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 1
+
+    # A checkout that already ran `submodule init` records the resolved URL; a
+    # fresh clone only has the possibly relative .gitmodules value.
+    url=$(git -C "$DOTFILES_DIR" config --get "submodule.$SSH_SUBMODULE_PATH.url" 2>/dev/null) \
+        || url=""
+    if [ -z "$url" ]; then
+        url=$(git -C "$DOTFILES_DIR" config --file "$DOTFILES_DIR/.gitmodules" \
+            --get "submodule.$SSH_SUBMODULE_PATH.url" 2>/dev/null) || url=""
+    fi
+    [ -n "$url" ] || return 1
+
+    case "$url" in
+        ./*|../*)
+            # Git resolves relative submodule URLs against the raw remote value
+            # without applying url.<base>.insteadOf rewrites.
+            origin=$(git -C "$DOTFILES_DIR" config --get remote.origin.url 2>/dev/null) \
+                || return 1
+            [ -n "$origin" ] || return 1
+            url=$(resolve_relative_git_url "$origin" "$url")
+            ;;
+    esac
+    printf '%s' "$url"
+}
+
+private_submodule_uses_github_https() {
+    case "$1" in
+        https://github.com/*|https://gist.github.com/*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+github_token_in_environment() {
+    [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ]
+}
+
+# Credential helpers run through `sh`, so quote for a POSIX shell instead of
+# using printf %q, whose $'...' output dash does not understand.
+shell_quote() {
+    printf "'%s'" "${1//\'/\'\\\'\'}"
+}
+
+find_gh() {
+    local candidate
+
+    if candidate=$(command -v gh 2>/dev/null) && [ -n "$candidate" ]; then
+        printf '%s' "$candidate"
+        return 0
+    fi
+    if [ -x "$LOCAL_BIN_DIR/gh" ]; then
+        printf '%s' "$LOCAL_BIN_DIR/gh"
+        return 0
+    fi
+    return 1
+}
+
+# `gh auth token` reads the stored credential without calling the API, so plan
+# output and dry runs stay offline.
+gh_has_github_token() {
+    "$1" auth token --hostname github.com >/dev/null 2>&1
+}
+
+github_access_status() {
+    local gh_bin url
+
+    if [ "${BOOTSTRAP_SKIP_SUBMODULES:-0}" = "1" ]; then
+        printf 'skip'
+        return
+    fi
+    if [ "${BOOTSTRAP_SKIP_GITHUB_AUTH:-0}" = "1" ]; then
+        printf 'skip-auth'
+        return
+    fi
+    if ! ssh_submodule_needs_init; then
+        printf 'ready'
+        return
+    fi
+    if ! url=$(private_submodule_url); then
+        printf 'unknown'
+        return
+    fi
+    if ! private_submodule_uses_github_https "$url"; then
+        printf 'other'
+        return
+    fi
+    if github_token_in_environment; then
+        printf 'token'
+        return
+    fi
+    if ! gh_bin=$(find_gh); then
+        printf 'install'
+        return
+    fi
+    if gh_has_github_token "$gh_bin"; then
+        printf 'ok'
+    else
+        printf 'login'
+    fi
+}
+
 validate_sources() {
     local allow_pending_ssh="${1:-0}" source
 
@@ -543,6 +681,37 @@ print_plan() {
             ;;
     esac
 
+    printf '\nGitHub access:\n'
+    case "$(github_access_status)" in
+        skip)
+            printf '  skip    submodule initialization disabled by BOOTSTRAP_SKIP_SUBMODULES\n'
+            ;;
+        skip-auth)
+            printf '  skip    GitHub sign-in disabled by BOOTSTRAP_SKIP_GITHUB_AUTH\n'
+            ;;
+        ready)
+            printf '  ok      private .ssh submodule already initialized\n'
+            ;;
+        unknown)
+            printf '  skip    private .ssh submodule URL is unavailable\n'
+            ;;
+        other)
+            printf '  none    private .ssh submodule does not use GitHub over HTTPS\n'
+            ;;
+        token)
+            printf '  ok      an environment token provides github.com credentials\n'
+            ;;
+        ok)
+            printf '  ok      gh is authenticated for github.com\n'
+            ;;
+        login)
+            printf '  auth    gh auth login for github.com during apply\n'
+            ;;
+        install)
+            printf '  install scripts/install/gh.sh, then gh auth login during apply\n'
+            ;;
+    esac
+
     printf '\nGit submodules:\n'
     case "$(git_submodules_status)" in
         none)
@@ -650,6 +819,19 @@ backup_only_targets() {
     done
 }
 
+# `git -c` reaches the clone git spawns for a submodule through
+# GIT_CONFIG_PARAMETERS, so credentials apply before ~/.config/git is linked.
+# With a helper configured, a missing credential is a hard failure rather than a
+# user name and password prompt GitHub would reject anyway.
+submodule_update() {
+    if [ "${#SSH_SUBMODULE_GIT_ARGS[@]}" -gt 0 ]; then
+        GIT_TERMINAL_PROMPT=0 git -C "$DOTFILES_DIR" "${SSH_SUBMODULE_GIT_ARGS[@]}" \
+            submodule update --init --recursive "$@"
+    else
+        git -C "$DOTFILES_DIR" submodule update --init --recursive "$@"
+    fi
+}
+
 init_submodules() {
     [ "${BOOTSTRAP_SKIP_SUBMODULES:-0}" = "1" ] && return 0
     [ -f "$DOTFILES_DIR/.gitmodules" ] || return 0
@@ -657,9 +839,81 @@ init_submodules() {
     git -C "$DOTFILES_DIR" rev-parse --git-dir >/dev/null 2>&1 || return 0
 
     printf '\nInitializing git submodules...\n'
-    if ! git -C "$DOTFILES_DIR" submodule update --init --recursive; then
+    if ! submodule_update; then
         printf 'warning: git submodule update failed; vendored plugins may be missing.\n' >&2
     fi
+}
+
+install_gh() {
+    local gh_installer="$DOTFILES_DIR/scripts/install/gh.sh"
+
+    [ -f "$gh_installer" ] || die "missing gh installer: $gh_installer"
+    printf '\nInstalling gh for private SSH configuration access...\n'
+    bash "$gh_installer" \
+        || die "gh install failed; the private .ssh submodule needs GitHub access"
+    hash -r 2>/dev/null || true
+}
+
+set_github_credential_helper() {
+    SSH_SUBMODULE_GIT_ARGS=(
+        -c 'credential.https://github.com.helper='
+        -c "credential.https://github.com.helper=$1"
+    )
+}
+
+# Dereference the token by name so it stays in the environment and never reaches
+# GIT_CONFIG_PARAMETERS or the process list.
+use_environment_github_token() {
+    [ -z "${GH_TOKEN:-}" ] || export GH_TOKEN
+    [ -z "${GITHUB_TOKEN:-}" ] || export GITHUB_TOKEN
+    set_github_credential_helper \
+        '!f() { test "$1" = get || exit 0; printf "username=x-access-token\npassword=%s\n" "${GH_TOKEN:-${GITHUB_TOKEN:-}}"; }; f'
+}
+
+# Resolve gh to an absolute path: $HOME/.local/bin is not necessarily on PATH
+# after scripts/install/gh.sh runs, and the helper runs in the clone child.
+use_gh_credential_helper() {
+    set_github_credential_helper "!$(shell_quote "$GH_BIN") auth git-credential"
+}
+
+# Authenticate GitHub before the private submodule clone so git never falls back
+# to prompting for a user name and password it cannot use.
+ensure_github_access() {
+    local status
+
+    SSH_SUBMODULE_GIT_ARGS=()
+    status=$(github_access_status)
+    case "$status" in
+        skip|skip-auth|ready|unknown|other)
+            return 0
+            ;;
+        token)
+            use_environment_github_token
+            return 0
+            ;;
+    esac
+
+    if [ "$status" = "ok" ]; then
+        GH_BIN=$(find_gh) || die "gh became unavailable while preparing GitHub access"
+        use_gh_credential_helper
+        return 0
+    fi
+
+    # gh prompts only when stdin and stdout are both terminals.
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        die "GitHub authentication is required to clone the private .ssh submodule; run 'gh auth login' first, set GH_TOKEN, or set BOOTSTRAP_SKIP_GITHUB_AUTH=1 to use your own Git credentials"
+    fi
+
+    if [ "$status" = "install" ]; then
+        install_gh
+    fi
+    GH_BIN=$(find_gh) || die "gh install completed, but gh is unavailable"
+    printf '\nSigning in to github.com with gh...\n'
+    "$GH_BIN" auth login --hostname github.com --git-protocol https \
+        || die "gh auth login did not complete; the private .ssh submodule was not cloned"
+    gh_has_github_token "$GH_BIN" \
+        || die "gh is still not signed in to github.com; the private .ssh submodule was not cloned"
+    use_gh_credential_helper
 }
 
 init_required_ssh_submodule() {
@@ -667,7 +921,7 @@ init_required_ssh_submodule() {
     ssh_submodule_needs_init || return 0
 
     printf '\nInitializing private SSH configuration...\n'
-    if ! git -C "$DOTFILES_DIR" submodule update --init --recursive -- "$SSH_SUBMODULE_PATH"; then
+    if ! submodule_update -- "$SSH_SUBMODULE_PATH"; then
         die "failed to initialize private .ssh submodule; verify access to ssh-config"
     fi
 }
@@ -731,6 +985,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 confirm_apply || exit 0
+ensure_github_access
 init_required_ssh_submodule
 validate_sources
 validate_shell_local_configuration_request

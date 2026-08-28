@@ -5,6 +5,10 @@ SOURCE_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
+# Keep the developer's own GitHub environment from selecting a different branch
+# of the private submodule authentication stage.
+unset GH_TOKEN GITHUB_TOKEN BOOTSTRAP_SKIP_GITHUB_AUTH BOOTSTRAP_SKIP_SUBMODULES
+
 # Run the ordinary bootstrap cases against a self-contained public fixture so
 # they never depend on access to the real private SSH submodule.
 ROOT_DIR="$TEST_ROOT/dotfiles"
@@ -41,6 +45,9 @@ setup_case() {
     CASE_BIN="$CASE_DIR/bin"
     CASE_LOG="$CASE_DIR/nvm.log"
     CASE_STATE="$CASE_DIR/node-installed"
+    CASE_GH_STATE="$CASE_DIR/gh-token"
+    CASE_GH_TOKEN=""
+    CASE_SKIP_GITHUB_AUTH=0
     CASE_NVM_SYMLINK_CURRENT=false
     CASE_BOOTSTRAP_TZ=Etc/UTC
     CASE_BOOTSTRAP_GIT_NAME="Bootstrap Test"
@@ -752,13 +759,82 @@ run_submodule_bootstrap() {
         FAKE_NVM_LOG="$CASE_LOG" \
         FAKE_NVM_STATE="$CASE_STATE" \
         NVM_SYMLINK_CURRENT="$CASE_NVM_SYMLINK_CURRENT" \
+        GH_TOKEN="$CASE_GH_TOKEN" \
+        FAKE_GH_STATE="$CASE_GH_STATE" \
+        BOOTSTRAP_SKIP_GITHUB_AUTH="$CASE_SKIP_GITHUB_AUTH" \
         GIT_ALLOW_PROTOCOL=file \
         "$dotfiles_dir/bootstrap.sh" "$@"
+}
+
+# gh stub shaped like the existing nvm/npm stubs: `auth token` succeeds only
+# once a token state file exists, and `auth login` creates it.
+write_gh_stub() {
+    cat >"$CASE_BIN/gh" <<'SCRIPT'
+#!/bin/sh
+printf 'gh:%s\n' "$*" >>"$FAKE_NVM_LOG"
+case "$1 $2" in
+    'auth token')
+        [ -f "$FAKE_GH_STATE" ] || exit 1
+        printf 'gho_faketoken\n'
+        ;;
+    'auth login')
+        : >"$FAKE_GH_STATE"
+        ;;
+    'auth git-credential')
+        printf 'protocol=https\nhost=github.com\nusername=x-access-token\npassword=gho_faketoken\n'
+        ;;
+    *)
+        exit 2
+        ;;
+esac
+SCRIPT
+    chmod +x "$CASE_BIN/gh"
+}
+
+# Make the configured submodule URL look like GitHub while the clone still uses
+# the local fixture. The rewrite lives only in GIT_CONFIG_PARAMETERS, so the
+# clone succeeds only if git propagates it into the submodule child - the same
+# mechanic bootstrap relies on to inject a credential helper.
+GITHUB_FIXTURE_ORIGIN="https://github.com/yanting-yang/dotfiles"
+
+setup_github_checkout() {
+    local checkout="$1"
+
+    git clone -q --no-recurse-submodules "$DOTFILES_FIXTURE_REPO" "$checkout"
+    git -C "$checkout" remote set-url origin "$GITHUB_FIXTURE_ORIGIN"
+    git -C "$checkout" config --file "$checkout/.gitmodules" \
+        submodule..ssh.url ../ssh-config
+}
+
+run_github_bootstrap() {
+    GIT_CONFIG_PARAMETERS="$GITHUB_URL_REWRITE" run_submodule_bootstrap "$@"
+}
+
+run_github_bootstrap_with_tty() {
+    local command dotfiles_dir="$1"
+    shift
+
+    printf -v command '%q --yes' "$dotfiles_dir/bootstrap.sh"
+    PATH="$CASE_BIN:$PATH" \
+        HOME="$CASE_HOME" \
+        NVM_DIR="$CASE_NVM_DIR" \
+        BOOTSTRAP_TZ="$CASE_BOOTSTRAP_TZ" \
+        BOOTSTRAP_GIT_NAME="$CASE_BOOTSTRAP_GIT_NAME" \
+        BOOTSTRAP_GIT_EMAIL="$CASE_BOOTSTRAP_GIT_EMAIL" \
+        FAKE_NVM_BIN="$CASE_BIN" \
+        FAKE_NVM_LOG="$CASE_LOG" \
+        FAKE_NVM_STATE="$CASE_STATE" \
+        FAKE_GH_STATE="$CASE_GH_STATE" \
+        NVM_SYMLINK_CURRENT="$CASE_NVM_SYMLINK_CURRENT" \
+        GIT_CONFIG_PARAMETERS="$GITHUB_URL_REWRITE" \
+        GIT_ALLOW_PROTOCOL=file \
+        script -qec "$command" /dev/null
 }
 
 SUBMODULE_FIXTURE="$TEST_ROOT/submodule-fixture"
 SSH_FIXTURE_REPO="$SUBMODULE_FIXTURE/ssh-config"
 DOTFILES_FIXTURE_REPO="$SUBMODULE_FIXTURE/dotfiles"
+GITHUB_URL_REWRITE="'url.$SUBMODULE_FIXTURE/.insteadOf=https://github.com/yanting-yang/'"
 mkdir -p "$SSH_FIXTURE_REPO" "$DOTFILES_FIXTURE_REPO"
 
 git -C "$SSH_FIXTURE_REPO" init -q -b main
@@ -841,3 +917,128 @@ grep -Fq 'failed to initialize private .ssh submodule' <<<"$failure_output"
 [ -L "$CASE_HOME/.config/git" ]
 [ "$(readlink "$CASE_HOME/.config/git")" = "$FAILED_PRIVATE_CHECKOUT/.config/git" ]
 [ ! -e "$CASE_HOME/.dotfiles-backup" ]
+
+# The file-URL fixtures above must stay on the pre-existing clone path.
+setup_case private_submodule_not_github
+NON_GITHUB_CHECKOUT="$CASE_DIR/dotfiles"
+git clone -q --no-recurse-submodules "$DOTFILES_FIXTURE_REPO" "$NON_GITHUB_CHECKOUT"
+output=$(run_submodule_bootstrap "$NON_GITHUB_CHECKOUT" --dry-run)
+grep -Fq 'none    private .ssh submodule does not use GitHub over HTTPS' <<<"$output"
+
+# An environment token clones without installing or invoking gh at all.
+setup_case github_submodule_env_token
+CASE_GH_TOKEN=ghp_faketoken
+GH_TOKEN_CHECKOUT="$CASE_DIR/dotfiles"
+setup_github_checkout "$GH_TOKEN_CHECKOUT"
+
+output=$(run_github_bootstrap "$GH_TOKEN_CHECKOUT" --dry-run)
+grep -Fq 'ok      an environment token provides github.com credentials' <<<"$output"
+[ ! -e "$GH_TOKEN_CHECKOUT/.ssh/config" ]
+assert_no_managed_home_changes
+
+run_github_bootstrap "$GH_TOKEN_CHECKOUT" --yes >/dev/null 2>&1
+[ -f "$GH_TOKEN_CHECKOUT/.ssh/config" ]
+[ -L "$CASE_HOME/.ssh/config" ]
+[ ! -e "$CASE_HOME/.local" ]
+if grep -Fq 'gh:' "$CASE_LOG"; then
+    printf 'bootstrap invoked gh even though a token was in the environment\n' >&2
+    exit 1
+fi
+
+# An already signed-in gh supplies credentials without a new login.
+setup_case github_submodule_gh_authenticated
+write_gh_stub
+: >"$CASE_GH_STATE"
+GH_AUTH_CHECKOUT="$CASE_DIR/dotfiles"
+setup_github_checkout "$GH_AUTH_CHECKOUT"
+
+output=$(run_github_bootstrap "$GH_AUTH_CHECKOUT" --dry-run)
+grep -Fq 'ok      gh is authenticated for github.com' <<<"$output"
+
+run_github_bootstrap "$GH_AUTH_CHECKOUT" --yes >/dev/null 2>&1
+[ -f "$GH_AUTH_CHECKOUT/.ssh/config" ]
+[ -L "$CASE_HOME/.ssh/config" ]
+grep -Fq 'gh:auth token --hostname github.com' "$CASE_LOG"
+if grep -Fq 'gh:auth login' "$CASE_LOG"; then
+    printf 'bootstrap re-ran gh auth login for an authenticated gh\n' >&2
+    exit 1
+fi
+
+# Without a terminal there is nothing to authenticate with, so bootstrap must
+# stop before touching any managed file in $HOME.
+setup_case github_submodule_requires_authentication
+write_gh_stub
+GH_UNAUTH_CHECKOUT="$CASE_DIR/dotfiles"
+setup_github_checkout "$GH_UNAUTH_CHECKOUT"
+
+output=$(run_github_bootstrap "$GH_UNAUTH_CHECKOUT" --dry-run)
+grep -Fq 'auth    gh auth login for github.com during apply' <<<"$output"
+
+if auth_output=$(run_github_bootstrap "$GH_UNAUTH_CHECKOUT" --yes </dev/null 2>&1); then
+    printf 'bootstrap unexpectedly cloned a private submodule without GitHub access\n' >&2
+    exit 1
+fi
+grep -Fq 'GitHub authentication is required' <<<"$auth_output"
+[ ! -e "$GH_UNAUTH_CHECKOUT/.ssh/config" ]
+assert_no_managed_home_changes
+if grep -Fq 'gh:auth login' "$CASE_LOG"; then
+    printf 'bootstrap ran gh auth login without a terminal\n' >&2
+    exit 1
+fi
+
+# On a terminal bootstrap installs gh when it is missing, signs in, and clones.
+setup_case github_submodule_installs_gh
+GH_INSTALL_CHECKOUT="$CASE_DIR/dotfiles"
+setup_github_checkout "$GH_INSTALL_CHECKOUT"
+mkdir -p "$GH_INSTALL_CHECKOUT/scripts/install"
+cat >"$GH_INSTALL_CHECKOUT/scripts/install/gh.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'install-gh\n' >>"$FAKE_NVM_LOG"
+mkdir -p "$HOME/.local/bin"
+cp "$FAKE_GH_SOURCE" "$HOME/.local/bin/gh"
+chmod +x "$HOME/.local/bin/gh"
+SCRIPT
+chmod +x "$GH_INSTALL_CHECKOUT/scripts/install/gh.sh"
+write_gh_stub
+mv "$CASE_BIN/gh" "$CASE_DIR/gh-stub"
+
+output=$(run_github_bootstrap "$GH_INSTALL_CHECKOUT" --dry-run)
+grep -Fq 'install scripts/install/gh.sh, then gh auth login during apply' <<<"$output"
+[ ! -e "$CASE_HOME/.local/bin/gh" ]
+
+FAKE_GH_SOURCE="$CASE_DIR/gh-stub" run_github_bootstrap_with_tty "$GH_INSTALL_CHECKOUT" \
+    >/dev/null 2>&1
+grep -Fq 'install-gh' "$CASE_LOG"
+[ -x "$CASE_HOME/.local/bin/gh" ]
+grep -Fq 'gh:auth login --hostname github.com --git-protocol https' "$CASE_LOG"
+[ -f "$GH_INSTALL_CHECKOUT/.ssh/config" ]
+[ -L "$CASE_HOME/.ssh/config" ]
+
+# The escape hatch restores the previous behavior for callers with their own
+# working Git credentials.
+setup_case github_submodule_auth_skipped
+CASE_SKIP_GITHUB_AUTH=1
+write_gh_stub
+GH_SKIP_CHECKOUT="$CASE_DIR/dotfiles"
+setup_github_checkout "$GH_SKIP_CHECKOUT"
+
+output=$(run_github_bootstrap "$GH_SKIP_CHECKOUT" --dry-run)
+grep -Fq 'skip    GitHub sign-in disabled by BOOTSTRAP_SKIP_GITHUB_AUTH' <<<"$output"
+
+run_github_bootstrap "$GH_SKIP_CHECKOUT" --yes </dev/null >/dev/null 2>&1
+[ -f "$GH_SKIP_CHECKOUT/.ssh/config" ]
+if grep -Fq 'gh:' "$CASE_LOG"; then
+    printf 'bootstrap invoked gh with BOOTSTRAP_SKIP_GITHUB_AUTH set\n' >&2
+    exit 1
+fi
+
+# Multi-level relative submodule URLs resolve the way git resolves them.
+setup_case github_submodule_url_levels
+CASE_GH_TOKEN=ghp_faketoken
+GH_LEVELS_CHECKOUT="$CASE_DIR/dotfiles"
+setup_github_checkout "$GH_LEVELS_CHECKOUT"
+git -C "$GH_LEVELS_CHECKOUT" config --file "$GH_LEVELS_CHECKOUT/.gitmodules" \
+    submodule..ssh.url ../../other-org/ssh-config
+output=$(run_github_bootstrap "$GH_LEVELS_CHECKOUT" --dry-run)
+grep -Fq 'ok      an environment token provides github.com credentials' <<<"$output"
