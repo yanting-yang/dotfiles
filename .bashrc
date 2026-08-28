@@ -1,8 +1,12 @@
-# If not running interactively, don't do anything
-case $- in
-    *i*) ;;
-    *) return ;;
-esac
+[[ $- != *i* ]] && return
+export EDITOR="nvim"
+export VISUAL=$EDITOR
+export XDG_CONFIG_HOME="$HOME/.config"
+export XDG_STATE_HOME="$HOME/.local/state"
+export LESSHISTFILE="$XDG_STATE_HOME/lesshst"
+export PATH="$HOME/.local/bin:$PATH"
+
+[ -f "$HOME/local.sh" ] && source "$HOME/local.sh"
 
 welcome() {
     . "$HOME/dotfiles/welcome.sh"
@@ -29,7 +33,7 @@ shopt -s histappend # append to the history file, don't overwrite it
 
 # shell variables
 HISTCONTROL=ignoreboth  # ignore lines starting with space and duplicates
-HISTFILE="$HOME/.local/state/bash_history"
+HISTFILE="$XDG_STATE_HOME/bash_history"
 HISTFILESIZE=2000
 HISTSIZE=1000
 PROMPT_COMMAND="timer_calc; ${PROMPT_COMMAND}"
@@ -61,7 +65,7 @@ if ! shopt -oq posix; then
 fi
 
 # nvm
-NVM_DIR="$HOME/.config/nvm"
+NVM_DIR="$XDG_CONFIG_HOME/nvm"
 [ -d "$NVM_DIR" ] && export NVM_DIR
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" # This loads nvm
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
@@ -75,6 +79,3 @@ TEXLIVE_PATH="/usr/local/texlive/2026/bin/x86_64-linux"
 [ -d "$TEXLIVE_PATH" ] && export PATH="$TEXLIVE_PATH:$PATH"
 TEXLIVE_PATH="$HOME/texlive/2026/bin/x86_64-linux"
 [ -d "$TEXLIVE_PATH" ] && export PATH="$TEXLIVE_PATH:$PATH"
-
-export LESSHISTFILE="$HOME/.local/state/lesshst"
-export TZ="America/Vancouver"

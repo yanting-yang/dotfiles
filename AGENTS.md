@@ -4,7 +4,7 @@
 
 This repository manages personal dotfiles and shell tooling.
 
-- Root shell entry points: `.profile`, `.bashrc`, `bootstrap.sh`, `welcome.sh`; the repository-local `.nvmrc` pins the welcome TUI's Node major and is not linked into `$HOME`.
+- Root shell entry points: `.bash_profile`, `.bashrc`, `bootstrap.sh`, `welcome.sh`; the repository-local `.nvmrc` pins the welcome TUI's Node major and is not linked into `$HOME`. Bootstrap generates the user-owned `$HOME/local.sh` with a timezone selected by `tzselect`; `.bashrc` sources it for interactive shells.
 - Configuration files: `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.config/kitty/`, `.config/tmux/`, `.ssh/config`.
 - Shared helpers: `scripts/lib/install.sh` for installer primitives, `scripts/lib/tui.sh` for terminal UI helpers, `scripts/lib/tool_status.sh` for welcome status rows, and `scripts/lib/code.sh` for Code-running detection.
 - Installers: `scripts/install/*.sh`, which should do preflight checks and download/extract into temporary directories before mutating managed locations.
@@ -18,13 +18,13 @@ Welcome tests live beside the TUI implementation, and `scripts/bootstrap.test.sh
 
 - `npm ci`: install the pinned Ink/React dependencies for the welcome TUI.
 - `npm test`: run Ink rendering/state tests and shell bridge smoke tests.
-- `bash -O globstar -n .profile welcome.sh bootstrap.sh scripts/**/*.sh`: syntax-check shell scripts before committing.
+- `bash -O globstar -n .bash_profile welcome.sh bootstrap.sh scripts/**/*.sh`: syntax-check shell scripts before committing.
 - `git diff --check`: detect whitespace errors.
 - `source ./welcome.sh`: manually open the welcome TUI in an interactive shell.
 - `node scripts/tui/welcome/cli.mjs`: run the welcome status path directly; non-TTY output prints a plain summary.
 - `source scripts/tui/nvm.sh; run_nvm_tui`: run the legacy/sourceable NVM TUI in the current shell.
 - `./bootstrap.sh --dry-run`: preview dotfile links without changing `$HOME`.
-- `./bootstrap.sh --yes`: link dotfiles into `$HOME`, initialize git submodules (the vendored tmux plugins under `.config/tmux/plugins/`), ensure nvm has the Node major pinned by the repository-local `.nvmrc` without changing nvm's default alias, and run `npm ci`; `.nvmrc` itself is not linked into `$HOME`, and existing link targets are backed up under `$HOME/.dotfiles-backup/`.
+- `./bootstrap.sh --yes`: link dotfiles into `$HOME`, initialize git submodules (the vendored tmux plugins under `.config/tmux/plugins/`), generate `$HOME/local.sh` through `tzselect` when absent, ensure nvm has the Node major pinned by the repository-local `.nvmrc` without changing nvm's default alias, and run `npm ci`; set `BOOTSTRAP_TZ=Etc/UTC` for unattended timezone selection. `.nvmrc` itself is not linked into `$HOME`, existing local settings are preserved, and existing link targets are backed up under `$HOME/.dotfiles-backup/`.
 
 ## Coding Style & Naming Conventions
 
@@ -36,7 +36,7 @@ The welcome UI should stay close to Claude Code's terminal shape: alternate full
 
 ## Testing Guidelines
 
-Run `npm test`, `bash -O globstar -n .profile welcome.sh bootstrap.sh scripts/**/*.sh`, and `git diff --check` for every change. For TUI changes, test interactively with harmless stubs where possible, for example overriding `curl`, installers, or `nvm` in a subshell to avoid real downloads, installs, or version switches. Verify both TTY and non-TTY paths when changing display logic, verify the tools view shows its action keys, verify the fixed terminal title is set/restored, and verify the `/` command menu renders at the bottom with descriptions plus working arrow/Enter selection. For bootstrap changes, smoke-test `--dry-run` and `--yes` with a temporary `HOME`.
+Run `npm test`, `bash -O globstar -n .bash_profile welcome.sh bootstrap.sh scripts/**/*.sh`, and `git diff --check` for every change. For TUI changes, test interactively with harmless stubs where possible, for example overriding `curl`, installers, or `nvm` in a subshell to avoid real downloads, installs, or version switches. Verify both TTY and non-TTY paths when changing display logic, verify the tools view shows its action keys, verify the fixed terminal title is set/restored, and verify the `/` command menu renders at the bottom with descriptions plus working arrow/Enter selection. For bootstrap changes, smoke-test `--dry-run` and `--yes` with a temporary `HOME`; set `BOOTSTRAP_TZ=Etc/UTC` for non-interactive applies.
 
 ## Commit & Pull Request Guidelines
 
