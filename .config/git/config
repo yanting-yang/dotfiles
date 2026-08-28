@@ -4,9 +4,6 @@
 [credential "https://gist.github.com"]
 	helper =
 	helper = !~/.local/bin/gh auth git-credential
-[user]
-	name = Yanting Yang
-	email = yantingyang2024@gmail.com
 [init]
 	defaultBranch = main
 [filter "lfs"]
@@ -14,3 +11,5 @@
 	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
+[include]
+	path = ~/.config/git/local

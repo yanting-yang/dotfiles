@@ -28,8 +28,23 @@ Bootstrap initializes the private submodule before changing managed dotfiles und
 
 On the first apply, Bootstrap uses `tzselect` to create a private, machine-local
 `~/local.sh` containing `TZ`; `.bashrc` sources that file for interactive shells.
-An existing file or symlink is preserved. For an unattended apply, provide an
-installed timezone explicitly, for example `BOOTSTRAP_TZ=Etc/UTC ./bootstrap.sh --yes`.
+It also asks for the Git user name and email and writes them to the mode-`600`
+`~/.config/git/local`, which the public Git config includes. The Git directory in
+`$HOME` remains local and only its `config` file is linked to this repository, so the
+identity file never resides in the public checkout. Existing `~/local.sh` and
+`~/.config/git/local` files or symlinks are preserved; managed link targets retain
+Bootstrap's normal backup-and-replace behavior. If a legacy `~/.gitconfig` still
+defines `user.name` or `user.email`, Bootstrap stops with a migration message because
+Git would read those values last.
+
+For an unattended first apply, provide all local values explicitly:
+
+```sh
+BOOTSTRAP_TZ=Etc/UTC \
+BOOTSTRAP_GIT_NAME='Example User' \
+BOOTSTRAP_GIT_EMAIL='user@example.com' \
+./bootstrap.sh --yes
+```
 
 The welcome TUI's Node major is pinned in the repository-local `.nvmrc`; Bootstrap
 does not link it to `$HOME`. Bootstrap ensures that nvm has a compatible runtime for
@@ -82,7 +97,8 @@ Removed commands and aliases such as `/updates`, `/install`, `/update`, `/quit`,
 
 - `.bash_profile`, `.bashrc`, `welcome.sh`, `bootstrap.sh`: root shell entry points.
 - `.nvmrc`: repository-local canonical Node major for the welcome TUI and package metadata.
-- `.config/git/`, `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.config/kitty/`, `.config/tmux/`: public managed configuration.
+- `.config/git/config`: public Git configuration; it includes the generated, untracked `~/.config/git/local` identity file.
+- `.config/nvim/`, `.config/vim/`, `.config/alacritty/`, `.config/kitty/`, `.config/tmux/`: public managed configuration directories.
 - `.ssh/`: private `ssh-config` submodule containing the managed SSH configuration.
 - `scripts/lib/`: shared Bash helpers for installers, status checks, and terminal utilities.
 - `scripts/install/`: explicit installers for managed tools.
@@ -109,7 +125,10 @@ For bootstrap changes, smoke-test with a temporary home:
 
 ```sh
 tmp_home=$(mktemp -d)
-BOOTSTRAP_TZ=Etc/UTC HOME="$tmp_home" ./bootstrap.sh --yes
+BOOTSTRAP_TZ=Etc/UTC \
+BOOTSTRAP_GIT_NAME='Bootstrap Test' \
+BOOTSTRAP_GIT_EMAIL='bootstrap@example.com' \
+HOME="$tmp_home" ./bootstrap.sh --yes
 ```
 
 ## Safety

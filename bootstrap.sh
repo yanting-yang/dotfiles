@@ -5,9 +5,20 @@ DOTFILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DRY_RUN=0
 YES=0
 BACKUP_DIR=""
-LOCAL_CONFIG="$HOME/local.sh"
+SHELL_LOCAL_CONFIG="$HOME/local.sh"
+GIT_CONFIG_DIR="$HOME/.config/git"
+GIT_CONFIG_PARENT="$HOME/.config"
+GIT_CONFIG_SOURCE="$DOTFILES_DIR/.config/git/config"
+GIT_CONFIG_TARGET="$GIT_CONFIG_DIR/config"
+GIT_LOCAL_CONFIG="$GIT_CONFIG_DIR/local"
+LEGACY_GIT_CONFIG="$HOME/.gitconfig"
 SSH_SUBMODULE_PATH=".ssh"
 SSH_CONFIG_SOURCE="$DOTFILES_DIR/$SSH_SUBMODULE_PATH/config"
+CREATE_SHELL_LOCAL_CONFIG=0
+CREATE_GIT_LOCAL_CONFIG=0
+SELECTED_TIMEZONE=""
+SELECTED_GIT_NAME=""
+SELECTED_GIT_EMAIL=""
 
 # shellcheck source=scripts/lib/node.sh
 source "$DOTFILES_DIR/scripts/lib/node.sh"
@@ -16,7 +27,6 @@ SOURCES=(
     "$DOTFILES_DIR/.bash_profile"
     "$DOTFILES_DIR/.bashrc"
     "$SSH_CONFIG_SOURCE"
-    "$DOTFILES_DIR/.config/git"
     "$DOTFILES_DIR/.config/nvim"
     "$DOTFILES_DIR/.config/kitty"
     "$DOTFILES_DIR/.config/tmux"
@@ -26,7 +36,6 @@ TARGETS=(
     "$HOME/.bash_profile"
     "$HOME/.bashrc"
     "$HOME/.ssh/config"
-    "$HOME/.config/git"
     "$HOME/.config/nvim"
     "$HOME/.config/kitty"
     "$HOME/.config/tmux"
@@ -43,10 +52,12 @@ usage() {
     printf 'Usage: %s [--dry-run] [--yes]\n' "${0##*/}"
     printf '\n'
     printf '  --dry-run  show planned links without changing files\n'
-    printf '  --yes      skip apply confirmation; timezone selection may still prompt\n'
+    printf '  --yes      skip apply confirmation; missing local settings may still prompt\n'
     printf '\n'
     printf 'Environment:\n'
-    printf '  BOOTSTRAP_TZ         timezone for unattended local.sh creation\n'
+    printf '  BOOTSTRAP_TZ          timezone for unattended local.sh creation\n'
+    printf '  BOOTSTRAP_GIT_NAME    Git user name for unattended identity creation\n'
+    printf '  BOOTSTRAP_GIT_EMAIL   Git user email for unattended identity creation\n'
     printf '  WELCOME_NODE_VERSION  Node major/version to install with nvm when needed [%s]\n' "$WELCOME_NODE_VERSION"
 }
 
@@ -122,24 +133,24 @@ target_status() {
     fi
 }
 
-local_config_exists() {
-    [ -f "$LOCAL_CONFIG" ] || [ -L "$LOCAL_CONFIG" ]
+shell_local_config_exists() {
+    [ -f "$SHELL_LOCAL_CONFIG" ] || [ -L "$SHELL_LOCAL_CONFIG" ]
 }
 
-validate_local_config_target() {
-    if [ -e "$LOCAL_CONFIG" ] && ! local_config_exists; then
-        die "$LOCAL_CONFIG exists but is not a regular file or symlink"
+validate_shell_local_config_target() {
+    if [ -e "$SHELL_LOCAL_CONFIG" ] && ! shell_local_config_exists; then
+        die "$SHELL_LOCAL_CONFIG exists but is not a regular file or symlink"
     fi
 }
 
-timezone_value_is_single_line() {
+value_is_nonempty_single_line() {
     [ -n "$1" ] && [[ "$1" != *$'\n'* ]] && [[ "$1" != *$'\r'* ]]
 }
 
 installed_timezone_is_valid() {
     local timezone="$1" zoneinfo_dir="${TZDIR:-/usr/share/zoneinfo}"
 
-    timezone_value_is_single_line "$timezone" || return 1
+    value_is_nonempty_single_line "$timezone" || return 1
     [[ "$timezone" =~ ^[A-Za-z0-9_+.-]+(/[A-Za-z0-9_+.-]+)*$ ]] || return 1
     case "/$timezone/" in
         */./*|*/../*) return 1 ;;
@@ -147,11 +158,104 @@ installed_timezone_is_valid() {
     [ -f "$zoneinfo_dir/$timezone" ] && [ -r "$zoneinfo_dir/$timezone" ]
 }
 
-validate_local_configuration_request() {
-    validate_local_config_target
-    if ! local_config_exists && [ -n "${BOOTSTRAP_TZ:-}" ]; then
+validate_shell_local_configuration_request() {
+    validate_shell_local_config_target
+    if ! shell_local_config_exists && [ -n "${BOOTSTRAP_TZ:-}" ]; then
         installed_timezone_is_valid "$BOOTSTRAP_TZ" \
             || die "invalid BOOTSTRAP_TZ: expected an installed timezone such as America/Vancouver"
+    fi
+}
+
+git_local_config_exists() {
+    [ -f "$GIT_LOCAL_CONFIG" ] || [ -L "$GIT_LOCAL_CONFIG" ]
+}
+
+git_local_path_is_present() {
+    [ -e "$GIT_LOCAL_CONFIG" ] || [ -L "$GIT_LOCAL_CONFIG" ]
+}
+
+git_config_directory_is_local() {
+    [ -d "$GIT_CONFIG_DIR" ] && [ ! -L "$GIT_CONFIG_DIR" ]
+}
+
+git_config_directory_requires_replacement() {
+    [ -L "$GIT_CONFIG_DIR" ] \
+        || { [ -e "$GIT_CONFIG_DIR" ] && [ ! -d "$GIT_CONFIG_DIR" ]; }
+}
+
+git_config_directory_resolves_inside_dotfiles() {
+    local resolved_directory resolved_dotfiles
+
+    resolved_directory=$(readlink -f "$GIT_CONFIG_DIR" 2>/dev/null) || return 1
+    resolved_dotfiles=$(readlink -f "$DOTFILES_DIR" 2>/dev/null) || return 1
+    case "$resolved_directory" in
+        "$resolved_dotfiles"|"$resolved_dotfiles"/*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+validate_git_configuration_layout() {
+    if { [ -e "$GIT_CONFIG_PARENT" ] || [ -L "$GIT_CONFIG_PARENT" ]; } \
+        && [ ! -d "$GIT_CONFIG_PARENT" ]; then
+        die "$(display_path "$GIT_CONFIG_PARENT") exists but is not a directory"
+    fi
+    if [ ! -L "$GIT_CONFIG_DIR" ] && git_config_directory_resolves_inside_dotfiles; then
+        die "$(display_path "$GIT_CONFIG_DIR") resolves inside the public dotfiles checkout through a linked ancestor"
+    fi
+    if [ -L "$GIT_CONFIG_DIR" ] && git_local_path_is_present; then
+        die "$(display_path "$GIT_LOCAL_CONFIG") is inside a linked Git config directory; move it aside before running bootstrap"
+    fi
+    if git_config_directory_is_local \
+        && git_local_path_is_present \
+        && ! git_local_config_exists; then
+        die "$(display_path "$GIT_LOCAL_CONFIG") exists but is not a regular file or symlink"
+    fi
+}
+
+git_identity_is_usable() {
+    local identity pattern='^.+ <.+> [0-9]+ [+-][0-9]{4}$'
+
+    identity=$(env -u EMAIL -u GIT_AUTHOR_DATE -u GIT_AUTHOR_EMAIL -u GIT_AUTHOR_NAME \
+        -u GIT_DIR -u GIT_WORK_TREE \
+        GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_CONFIG_NOSYSTEM=1 \
+        git -c "user.name=$1" -c "user.email=$2" -C "$HOME" \
+        var GIT_AUTHOR_IDENT 2>/dev/null) \
+        || return 1
+    [[ "$identity" =~ $pattern ]]
+}
+
+validate_git_identity_values() {
+    value_is_nonempty_single_line "$1" \
+        && value_is_nonempty_single_line "$2" \
+        && git_identity_is_usable "$1" "$2"
+}
+
+legacy_git_config_has_identity() {
+    [ -f "$LEGACY_GIT_CONFIG" ] || [ -L "$LEGACY_GIT_CONFIG" ] || return 1
+    git config --file "$LEGACY_GIT_CONFIG" --includes --get user.name >/dev/null 2>&1 \
+        || git config --file "$LEGACY_GIT_CONFIG" --includes --get user.email >/dev/null 2>&1
+}
+
+validate_git_identity_request() {
+    validate_git_configuration_layout
+    if legacy_git_config_has_identity; then
+        die "$(display_path "$LEGACY_GIT_CONFIG") defines a Git identity that would override $(display_path "$GIT_LOCAL_CONFIG"); remove its [user] settings before running bootstrap"
+    fi
+    git_local_config_exists && return 0
+
+    command -v git >/dev/null 2>&1 \
+        || die "git is required to create $GIT_LOCAL_CONFIG"
+
+    if [ -n "${BOOTSTRAP_GIT_NAME:-}" ] || [ -n "${BOOTSTRAP_GIT_EMAIL:-}" ]; then
+        [ -n "${BOOTSTRAP_GIT_NAME:-}" ] && [ -n "${BOOTSTRAP_GIT_EMAIL:-}" ] \
+            || die "set both BOOTSTRAP_GIT_NAME and BOOTSTRAP_GIT_EMAIL"
+        validate_git_identity_values "$BOOTSTRAP_GIT_NAME" "$BOOTSTRAP_GIT_EMAIL" \
+            || die "BOOTSTRAP_GIT_NAME and BOOTSTRAP_GIT_EMAIL must be non-empty single-line values with Git-usable characters"
     fi
 }
 
@@ -171,12 +275,44 @@ select_timezone() {
         || die "tzselect is required to create ~/local.sh"
     timezone=$(command tzselect) \
         || die "timezone selection failed; ~/local.sh was not created"
-    timezone_value_is_single_line "$timezone" \
+    value_is_nonempty_single_line "$timezone" \
         || die "tzselect returned an invalid timezone"
     printf '%s' "$timezone"
 }
 
-publish_local_config() (
+select_git_identity() {
+    if [ -n "${BOOTSTRAP_GIT_NAME:-}" ] || [ -n "${BOOTSTRAP_GIT_EMAIL:-}" ]; then
+        SELECTED_GIT_NAME="$BOOTSTRAP_GIT_NAME"
+        SELECTED_GIT_EMAIL="$BOOTSTRAP_GIT_EMAIL"
+        return 0
+    fi
+
+    [ -t 0 ] \
+        || die "cannot create ~/.config/git/local non-interactively; set BOOTSTRAP_GIT_NAME and BOOTSTRAP_GIT_EMAIL"
+    printf 'Git user name: ' >&2
+    IFS= read -r SELECTED_GIT_NAME \
+        || die "Git user name input ended; ~/.config/git/local was not created"
+    printf 'Git user email: ' >&2
+    IFS= read -r SELECTED_GIT_EMAIL \
+        || die "Git user email input ended; ~/.config/git/local was not created"
+    validate_git_identity_values "$SELECTED_GIT_NAME" "$SELECTED_GIT_EMAIL" \
+        || die "Git user name and email must be non-empty single-line values with Git-usable characters"
+}
+
+collect_local_settings() {
+    if ! shell_local_config_exists; then
+        if ! SELECTED_TIMEZONE=$(select_timezone); then
+            return 1
+        fi
+        CREATE_SHELL_LOCAL_CONFIG=1
+    fi
+    if ! git_local_config_exists; then
+        select_git_identity
+        CREATE_GIT_LOCAL_CONFIG=1
+    fi
+}
+
+publish_shell_local_config() (
     local temporary="" timezone="$1"
 
     trap '[ -z "$temporary" ] || rm -f -- "$temporary"' EXIT
@@ -191,33 +327,72 @@ publish_local_config() (
     chmod 600 "$temporary" \
         || die "could not secure the local configuration"
 
-    if local_config_exists; then
-        printf '  keep    %s (created concurrently)\n' "$(display_path "$LOCAL_CONFIG")"
+    if shell_local_config_exists; then
+        printf '  keep    %s (created concurrently)\n' "$(display_path "$SHELL_LOCAL_CONFIG")"
         return 0
     fi
-    if ln -T -- "$temporary" "$LOCAL_CONFIG" 2>/dev/null; then
-        printf '  created %s with TZ=%s\n' "$(display_path "$LOCAL_CONFIG")" "$timezone"
+    if ln -T -- "$temporary" "$SHELL_LOCAL_CONFIG" 2>/dev/null; then
+        printf '  created %s with TZ=%s\n' "$(display_path "$SHELL_LOCAL_CONFIG")" "$timezone"
         return 0
     fi
 
-    if local_config_exists; then
-        printf '  keep    %s (created concurrently)\n' "$(display_path "$LOCAL_CONFIG")"
+    if shell_local_config_exists; then
+        printf '  keep    %s (created concurrently)\n' "$(display_path "$SHELL_LOCAL_CONFIG")"
         return 0
     fi
-    validate_local_config_target
-    die "could not create $LOCAL_CONFIG"
+    validate_shell_local_config_target
+    die "could not create $SHELL_LOCAL_CONFIG"
 )
 
-ensure_local_config() {
-    local timezone
-
-    validate_local_configuration_request
-    local_config_exists && return 0
-    if ! timezone=$(select_timezone); then
-        return 1
-    fi
-    publish_local_config "$timezone"
+validate_git_config_directory_ready() {
+    git_config_directory_is_local \
+        || die "$GIT_CONFIG_DIR must be a real directory before creating Git identity"
 }
+
+publish_git_local_config() (
+    local email="$2" lock_file="" name="$1" stored_email stored_name temporary=""
+
+    umask 077
+    trap '[ -z "$lock_file" ] || rm -f -- "$lock_file" 2>/dev/null || true; [ -z "$temporary" ] || rm -f -- "$temporary" 2>/dev/null || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    validate_git_config_directory_ready
+    temporary=$(mktemp "$GIT_CONFIG_DIR/.local.XXXXXX") \
+        || die "could not create a temporary Git identity configuration"
+    lock_file="$temporary.lock"
+    printf '# Generated by bootstrap.sh for machine-local Git identity.\n' >"$temporary" \
+        || die "could not write the Git identity configuration"
+    git config --file "$temporary" user.name "$name" \
+        || die "could not write the Git user name"
+    git config --file "$temporary" user.email "$email" \
+        || die "could not write the Git user email"
+    chmod 600 "$temporary" \
+        || die "could not secure the Git identity configuration"
+    stored_name=$(git config --file "$temporary" --get user.name) \
+        || die "could not verify the Git user name"
+    stored_email=$(git config --file "$temporary" --get user.email) \
+        || die "could not verify the Git user email"
+    [ "$stored_name" = "$name" ] && [ "$stored_email" = "$email" ] \
+        || die "Git identity did not round-trip safely"
+
+    if git_local_config_exists; then
+        printf '  keep    %s (created concurrently)\n' "$(display_path "$GIT_LOCAL_CONFIG")"
+        return 0
+    fi
+    validate_git_config_directory_ready
+    if ln -T -- "$temporary" "$GIT_LOCAL_CONFIG" 2>/dev/null; then
+        printf '  created %s\n' "$(display_path "$GIT_LOCAL_CONFIG")"
+        return 0
+    fi
+
+    if git_local_config_exists; then
+        printf '  keep    %s (created concurrently)\n' "$(display_path "$GIT_LOCAL_CONFIG")"
+        return 0
+    fi
+    validate_git_configuration_layout
+    die "could not create $GIT_LOCAL_CONFIG"
+)
 
 ssh_submodule_needs_init() {
     [ -f "$DOTFILES_DIR/.gitmodules" ] || return 1
@@ -241,6 +416,7 @@ validate_sources() {
         fi
     done
 
+    [ -f "$GIT_CONFIG_SOURCE" ] || die "missing source: $GIT_CONFIG_SOURCE"
     [ -f "$DOTFILES_DIR/package.json" ] || die "missing source: $DOTFILES_DIR/package.json"
     [ -f "$DOTFILES_DIR/package-lock.json" ] || die "missing source: $DOTFILES_DIR/package-lock.json"
     [ -f "$DOTFILES_DIR/scripts/tui/welcome/cli.mjs" ] || die "missing welcome app"
@@ -321,13 +497,37 @@ print_plan() {
     done
 
     printf '\nLocal settings:\n'
-    if local_config_exists; then
-        printf '  keep    %s (user-managed)\n' "$(display_path "$LOCAL_CONFIG")"
+    if shell_local_config_exists; then
+        printf '  keep    %s (user-managed)\n' "$(display_path "$SHELL_LOCAL_CONFIG")"
     elif [ -n "${BOOTSTRAP_TZ:-}" ]; then
-        printf '  create  %s with the configured timezone\n' "$(display_path "$LOCAL_CONFIG")"
+        printf '  create  %s with the configured timezone\n' "$(display_path "$SHELL_LOCAL_CONFIG")"
     else
-        printf '  select  %s timezone with tzselect during apply\n' "$(display_path "$LOCAL_CONFIG")"
+        printf '  select  %s timezone with tzselect during apply\n' "$(display_path "$SHELL_LOCAL_CONFIG")"
     fi
+
+    printf '\nGit configuration:\n'
+    if [ -L "$GIT_CONFIG_DIR" ]; then
+        printf '  migrate %s from a linked directory to a local directory\n' "$(display_path "$GIT_CONFIG_DIR")"
+    elif [ -e "$GIT_CONFIG_DIR" ] && [ ! -d "$GIT_CONFIG_DIR" ]; then
+        printf '  replace %s with a local directory\n' "$(display_path "$GIT_CONFIG_DIR")"
+    elif git_config_directory_is_local; then
+        printf '  keep    %s (local directory)\n' "$(display_path "$GIT_CONFIG_DIR")"
+    else
+        printf '  create  %s as a local directory\n' "$(display_path "$GIT_CONFIG_DIR")"
+    fi
+    if git_local_config_exists; then
+        printf '  keep    %s (user-managed)\n' "$(display_path "$GIT_LOCAL_CONFIG")"
+    elif [ -n "${BOOTSTRAP_GIT_NAME:-}" ] && [ -n "${BOOTSTRAP_GIT_EMAIL:-}" ]; then
+        printf '  create  %s with the configured Git identity\n' "$(display_path "$GIT_LOCAL_CONFIG")"
+    else
+        printf '  select  %s Git identity during apply\n' "$(display_path "$GIT_LOCAL_CONFIG")"
+    fi
+    if git_config_directory_is_local; then
+        status=$(target_status "$GIT_CONFIG_SOURCE" "$GIT_CONFIG_TARGET")
+    else
+        status="create"
+    fi
+    printf '  %-7s %s -> %s\n' "$status" "$(display_path "$GIT_CONFIG_TARGET")" "$GIT_CONFIG_SOURCE"
 
     welcome_status=$(welcome_dependency_status)
     printf '\nWelcome TUI:\n'
@@ -402,6 +602,17 @@ backup_target() {
     mkdir -p "$(dirname "$backup_path")"
     mv "$target" "$backup_path"
     printf '  backed up %s -> %s\n' "$(display_path "$target")" "$backup_path"
+}
+
+prepare_git_config_directory() {
+    validate_git_configuration_layout
+    if git_config_directory_requires_replacement; then
+        backup_target "$GIT_CONFIG_DIR"
+    fi
+    mkdir -p "$GIT_CONFIG_DIR" \
+        || die "could not create $GIT_CONFIG_DIR"
+    validate_git_config_directory_ready
+    validate_git_configuration_layout
 }
 
 link_target() {
@@ -510,7 +721,8 @@ install_welcome_deps() {
 }
 
 validate_sources 1
-validate_local_configuration_request
+validate_shell_local_configuration_request
+validate_git_identity_request
 print_plan
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -521,7 +733,17 @@ fi
 confirm_apply || exit 0
 init_required_ssh_submodule
 validate_sources
-ensure_local_config
+validate_shell_local_configuration_request
+validate_git_identity_request
+collect_local_settings
+if [ "$CREATE_SHELL_LOCAL_CONFIG" -eq 1 ]; then
+    publish_shell_local_config "$SELECTED_TIMEZONE"
+fi
+prepare_git_config_directory
+if [ "$CREATE_GIT_LOCAL_CONFIG" -eq 1 ]; then
+    publish_git_local_config "$SELECTED_GIT_NAME" "$SELECTED_GIT_EMAIL"
+fi
+link_target "$GIT_CONFIG_SOURCE" "$GIT_CONFIG_TARGET"
 apply_links
 backup_only_targets
 init_submodules
