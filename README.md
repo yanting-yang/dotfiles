@@ -89,6 +89,13 @@ Node appears in the normal tool list. Updating it installs and activates the lat
 release in the active major through nvm, then removes superseded installations from
 that major while preserving installations from other majors.
 
+LaTeX also appears in the managed tool list. Its install action uses TeX Live's
+verified network installer for the full scheme, stores releases under
+`$HOME/texlive/YYYY`, and selects the completed release through
+`$HOME/texlive/current`. Set `TEXLIVE_ROOT` in `local.sh` to use another
+filesystem. The action shows live progress because a full installation is roughly
+10 GB and may take several hours.
+
 The intentionally supported slash commands are `/check`, `/help`, and `/exit`.
 Removed commands and aliases such as `/updates`, `/install`, `/update`, `/quit`,
 `/nvm`, `/node`, `/tools`, `/local`, and `/all` should remain unavailable.

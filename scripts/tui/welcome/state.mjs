@@ -18,6 +18,14 @@ export const SLASH_COMMANDS = [
 
 export const HELP_LINES = SLASH_COMMANDS.map(command => `${command.name}  ${command.description}`);
 
+const TOOL_DISPLAY_NAMES = {
+    latex: 'LaTeX'
+};
+
+export function toolDisplayName(command) {
+    return TOOL_DISPLAY_NAMES[command] ?? command;
+}
+
 export function clampSelection(selected, count) {
     if (count <= 0) {
         return 0;
@@ -91,15 +99,20 @@ export function toolActionOptions(row) {
 
     const options = [];
     const command = row.command ?? 'selected tool';
+    const displayName = toolDisplayName(command);
 
     if (row.actionable) {
         const type = row.status === 'missing' || row.path === 'not installed'
             ? 'install'
             : 'update';
-        options.push({type, label: `${type === 'install' ? 'Install' : 'Update'} ${command}`});
+        const detail = command === 'latex' ? ' (TeX Live; full default ~10 GB)' : '';
+        options.push({
+            type,
+            label: `${type === 'install' ? 'Install' : 'Update'} ${displayName}${detail}`
+        });
     }
     if (row.uninstallable) {
-        options.push({type: 'uninstall', label: `Uninstall ${command}`});
+        options.push({type: 'uninstall', label: `Uninstall ${displayName}`});
     }
 
     return options;

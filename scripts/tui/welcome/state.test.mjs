@@ -8,6 +8,7 @@ import {
     SLASH_COMMANDS,
     toolAction,
     toolActionOptions,
+    toolDisplayName,
     toolUninstallAction,
     visibleWindowStart
 } from './state.mjs';
@@ -87,6 +88,16 @@ test('builds only available tool action options', () => {
         {type: 'uninstall', label: 'Uninstall gh'}
     ]);
     assert.deepEqual(toolActionOptions({command: 'gh'}), []);
+    assert.equal(toolDisplayName('latex'), 'LaTeX');
+    assert.deepEqual(toolActionOptions({
+        command: 'latex',
+        path: 'not installed',
+        status: 'missing',
+        actionable: true,
+        uninstallable: false
+    }), [
+        {type: 'install', label: 'Install LaTeX (TeX Live; full default ~10 GB)'}
+    ]);
 });
 
 test('builds action file payloads', () => {

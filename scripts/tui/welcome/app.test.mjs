@@ -4,7 +4,7 @@ import {stripVTControlCharacters} from 'node:util';
 import React from 'react';
 import {renderToString} from 'ink';
 import {render} from 'ink-testing-library';
-import {App, WelcomePanel} from './app.mjs';
+import {App, transcriptLineCount, WelcomePanel} from './app.mjs';
 
 const h = React.createElement;
 
@@ -64,6 +64,13 @@ function assertActionKeyColumns(frame, rows) {
     assert.equal(new Set(positions.map(position => position.keyStart)).size, 1);
     assert.equal(new Set(positions.map(position => position.descriptionStart)).size, 1);
 }
+
+test('counts explicit transcript lines when sizing the tool table', () => {
+    assert.equal(transcriptLineCount([
+        {text: 'one'},
+        {text: 'two\nthree\nfour'}
+    ]), 4);
+});
 
 test('preserves the fixed action panel on narrow terminals', () => {
     for (const width of [60, 30]) {
@@ -176,6 +183,35 @@ test('renders catppuccin as a tmux child in the tool table', async () => {
     unmount();
 });
 
+test('renders the LaTeX managed-tool name', async () => {
+    const tools = {
+        kind: 'tools',
+        includeUpdates: false,
+        rows: [{
+            id: 'latex',
+            command: 'latex',
+            path: 'not installed',
+            current: 'unknown',
+            latest: 'unchecked',
+            status: 'missing',
+            installer: '/tmp/latex.sh',
+            actionable: true,
+            uninstallable: false
+        }]
+    };
+
+    const {lastFrame, unmount} = render(h(App, {
+        loaders: {loadTools: async () => tools},
+        resultFile: '',
+        actionFile: '/tmp/unused-action'
+    }));
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.match(lastFrame(), /LaTeX/);
+    assert.doesNotMatch(lastFrame(), /^\s*>?\s*latex\b/m);
+    unmount();
+});
+
 test('renders node as an nvm child in the tool table', async () => {
     const tools = {
         kind: 'tools',
@@ -265,6 +301,21 @@ test('shows only the actions available for the selected tool', async () => {
             },
             expected: 'Uninstall tmux',
             absent: ['Install tmux', 'Update tmux']
+        },
+        {
+            row: {
+                id: 'latex',
+                command: 'latex',
+                path: 'not installed',
+                current: 'unknown',
+                latest: 'unchecked',
+                status: 'missing',
+                installer: '/tmp/latex.sh',
+                actionable: true,
+                uninstallable: false
+            },
+            expected: 'Install LaTeX \\(TeX Live; full default ~10 GB\\)',
+            absent: ['Update LaTeX', 'Uninstall LaTeX']
         }
     ];
 

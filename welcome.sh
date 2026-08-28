@@ -71,6 +71,23 @@ welcome_valid_node_version() {
     [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
+welcome_activate_texlive() {
+    local texlive_root="${TEXLIVE_ROOT:-$HOME/texlive}" texlive_bin
+
+    for texlive_bin in "$texlive_root"/current/bin/*; do
+        [ -x "$texlive_bin/latex" ] || continue
+        case ":$PATH:" in
+            *":$texlive_bin:"*) ;;
+            *) PATH="$texlive_bin:$PATH" ;;
+        esac
+        export PATH
+        hash -r 2>/dev/null || true
+        return 0
+    done
+
+    return 1
+}
+
 welcome_run_installer_by_index() {
     local index="$1" installer="${INSTALLERS[$1]}"
     local code_running_status rc command_name
@@ -101,13 +118,24 @@ welcome_run_installer_by_index() {
     fi
 
     printf 'Installing latest %s...\n' "$command_name"
-    if bash "$installer"; then
+    if [ "$command_name" = "latex" ]; then
+        if TEXLIVE_ROOT="${TEXLIVE_ROOT:-$HOME/texlive}" \
+            TEXLIVE_SCHEME="${TEXLIVE_SCHEME:-scheme-full}" \
+            bash "$installer"; then
+            rc=0
+        else
+            rc=$?
+        fi
+    elif bash "$installer"; then
         rc=0
     else
         rc=$?
     fi
 
     if [ "$rc" -eq 0 ]; then
+        if [ "$command_name" = "latex" ] && ! welcome_activate_texlive; then
+            printf 'TeX Live was installed, but its binary directory could not be added to PATH.\n'
+        fi
         hash -r 2>/dev/null || true
         printf 'Installed latest %s.\n' "$command_name"
     else
@@ -450,6 +478,7 @@ welcome_record_result() {
 welcome_execute_action_file() {
     local action_file="$1" result_file="$2"
     local action command_name include_updates output action_output_file rc
+    local action_output_fd action_output_pid tee_rc
 
     action=$(welcome_action_value ACTION "$action_file")
     include_updates=$(welcome_action_value INCLUDE_UPDATES "$action_file")
@@ -468,6 +497,36 @@ welcome_execute_action_file() {
                 output=""
                 if [ -s "$action_output_file" ]; then
                     IFS= read -r -d '' output <"$action_output_file" || true
+                fi
+                rm -f -- "$action_output_file"
+            elif [ "$command_name" = "latex" ]; then
+                # A full TeX Live install can take hours. Keep its progress on
+                # the terminal and retain a bounded failure excerpt for Ink.
+                action_output_file="${result_file}.action-output"
+                exec {action_output_fd}> >(tee "$action_output_file")
+                action_output_pid=$!
+                if welcome_run_tool_installer "$command_name" "$include_updates" \
+                    >&"$action_output_fd" 2>&1; then
+                    rc=0
+                else
+                    rc=$?
+                fi
+                exec {action_output_fd}>&-
+                if wait "$action_output_pid" 2>/dev/null; then
+                    tee_rc=0
+                else
+                    tee_rc=$?
+                fi
+                [ "$rc" -ne 0 ] || rc=$tee_rc
+
+                if [ "$rc" -eq 0 ]; then
+                    output="Installer output was shown in the terminal."
+                elif [ -s "$action_output_file" ]; then
+                    output=$(tail -c 4096 "$action_output_file")
+                    output=${output//$'\r'/$'\n'}
+                    output=$(printf '%s\n' "$output" | tail -n 8)
+                else
+                    output="The installer failed without producing output."
                 fi
                 rm -f -- "$action_output_file"
             else

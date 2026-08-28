@@ -75,7 +75,20 @@ CUDA_PATH="/usr/local/cuda/bin"
 [ -d "$CUDA_PATH" ] && export PATH="$CUDA_PATH:$PATH"
 
 # texlive
-TEXLIVE_PATH="/usr/local/texlive/2026/bin/x86_64-linux"
-[ -d "$TEXLIVE_PATH" ] && export PATH="$TEXLIVE_PATH:$PATH"
-TEXLIVE_PATH="$HOME/texlive/2026/bin/x86_64-linux"
-[ -d "$TEXLIVE_PATH" ] && export PATH="$TEXLIVE_PATH:$PATH"
+DOTFILES_TEXLIVE_PATH=""
+for DOTFILES_TEXLIVE_CANDIDATE in /usr/local/texlive/[0-9][0-9][0-9][0-9]/bin/*; do
+    [ -x "$DOTFILES_TEXLIVE_CANDIDATE/latex" ] \
+        && DOTFILES_TEXLIVE_PATH="$DOTFILES_TEXLIVE_CANDIDATE"
+done
+[ -n "$DOTFILES_TEXLIVE_PATH" ] && PATH="$DOTFILES_TEXLIVE_PATH:$PATH"
+
+DOTFILES_TEXLIVE_PATH=""
+for DOTFILES_TEXLIVE_CANDIDATE in \
+    "${TEXLIVE_ROOT:-$HOME/texlive}"/[0-9][0-9][0-9][0-9]/bin/* \
+    "${TEXLIVE_ROOT:-$HOME/texlive}"/current/bin/*; do
+    [ -x "$DOTFILES_TEXLIVE_CANDIDATE/latex" ] \
+        && DOTFILES_TEXLIVE_PATH="$DOTFILES_TEXLIVE_CANDIDATE"
+done
+[ -n "$DOTFILES_TEXLIVE_PATH" ] && PATH="$DOTFILES_TEXLIVE_PATH:$PATH"
+export PATH
+unset DOTFILES_TEXLIVE_CANDIDATE DOTFILES_TEXLIVE_PATH

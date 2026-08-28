@@ -86,6 +86,32 @@ get_stow_latest() {
     fi
 }
 
+get_texlive_latest() {
+    local latest metadata
+
+    if tool_status_cache_read texlive; then
+        return 0
+    fi
+    command -v curl >/dev/null 2>&1 || return 0
+
+    # The release marker is near the start of TeX Live's package database.
+    # Bound the explicit check so a mirror that ignores Range cannot turn a
+    # version lookup into a full database download.
+    metadata=$(curl -fsSL \
+        --range 0-16383 \
+        --max-filesize 32768 \
+        --max-time 20 \
+        https://mirror.ctan.org/systems/texlive/tlnet/tlpkg/texlive.tlpdb \
+        2>/dev/null) || return 0
+    latest=$(printf '%s\n' "$metadata" \
+        | sed -n 's/^depend release\/\([0-9][0-9]*\)$/\1/p' \
+        | head -1)
+    texlive_year_is_valid "$latest" || return 0
+
+    tool_status_cache_write texlive "$latest"
+    printf '%s' "$latest"
+}
+
 get_nvm_node_latest() {
     local major="$1" cache_key="node-$1" index latest manifest mirror
 
@@ -246,6 +272,44 @@ node_version_is_valid() {
     [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
+texlive_year_is_valid() {
+    [[ "$1" =~ ^20[0-9]{2}$ ]]
+}
+
+texlive_year_is_newer() {
+    local current="$1" latest="$2"
+
+    texlive_year_is_valid "$current" || return 1
+    texlive_year_is_valid "$latest" || return 1
+    ((10#$latest > 10#$current))
+}
+
+texlive_installed_year() {
+    local latex_bin="$1" latex_dir tlmgr_bin year
+
+    latex_bin=$(readlink -f "$latex_bin" 2>/dev/null || printf '%s' "$latex_bin")
+    latex_dir=${latex_bin%/*}
+    tlmgr_bin="$latex_dir/tlmgr"
+
+    if [ -x "$tlmgr_bin" ]; then
+        year=$("$tlmgr_bin" --version 2>/dev/null \
+            | sed -n 's/^TeX Live .* version \(20[0-9][0-9]\).*$/\1/p' \
+            | head -1)
+        if texlive_year_is_valid "$year"; then
+            printf '%s' "$year"
+            return 0
+        fi
+    fi
+
+    year=$("$latex_bin" --version 2>/dev/null \
+        | sed -n '1{s/.*(TeX Live \(20[0-9][0-9]\).*$/\1/p;q;}')
+    if texlive_year_is_valid "$year"; then
+        printf '%s' "$year"
+    else
+        printf 'unknown'
+    fi
+}
+
 node_version_is_newer() {
     local current="$1" latest="$2"
     local current_major current_minor current_patch
@@ -274,6 +338,14 @@ row_status() {
         if node_version_is_newer "$current" "$latest"; then
             printf 'update'
         elif node_version_is_valid "$current" && node_version_is_valid "$latest"; then
+            printf 'current'
+        else
+            printf 'check'
+        fi
+    elif [ "$command" = "latex" ]; then
+        if texlive_year_is_newer "$current" "$latest"; then
+            printf 'update'
+        elif texlive_year_is_valid "$current" && texlive_year_is_valid "$latest"; then
             printf 'current'
         else
             printf 'check'
@@ -356,6 +428,7 @@ load_rows() {
     local stow_latest stow_current
     local tmux_latest tmux_current
     local kitty_latest kitty_current
+    local latex_latest latex_current latex_bin
     local maple_latest maple_current maple_dir
     local catppuccin_latest catppuccin_current catppuccin_dir
     local code_bin="$HOME/code"
@@ -470,6 +543,16 @@ load_rows() {
         add_missing_row "kitty" "$kitty_latest" "$TOOL_STATUS_INSTALL_DIR/kitty.sh"
     fi
 
+    latex_latest="$LATEST_UNCHECKED"
+    if latex_bin=$(command -v latex 2>/dev/null); then
+        [ "$include_updates" -eq 1 ] && latex_latest=$(get_texlive_latest)
+        [ -n "$latex_latest" ] || latex_latest="unknown"
+        latex_current=$(texlive_installed_year "$latex_bin")
+        add_cmd_row "latex" "latex" "$latex_current" "$latex_latest" "$TOOL_STATUS_INSTALL_DIR/latex.sh"
+    else
+        add_missing_row "latex" "$latex_latest" "$TOOL_STATUS_INSTALL_DIR/latex.sh"
+    fi
+
     maple_latest="$LATEST_UNCHECKED"
     maple_dir=$(maple_font_dir)
     if maple_font_installed "$maple_dir"; then
@@ -524,6 +607,13 @@ row_is_actionable() {
     if [ "${COMMANDS[$index]}" = "node" ]; then
         [ "${PATHS[$index]}" != "not installed" ] || return 1
         node_version_is_newer "${CURRENTS[$index]}" "${LATESTS[$index]}"
+        return
+    fi
+
+    if [ "${COMMANDS[$index]}" = "latex" ] \
+        && [ "${PATHS[$index]}" != "not installed" ]; then
+        [ -n "${INSTALLERS[$index]}" ] || return 1
+        texlive_year_is_newer "${CURRENTS[$index]}" "${LATESTS[$index]}"
         return
     fi
 

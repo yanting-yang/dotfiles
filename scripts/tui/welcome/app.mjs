@@ -8,6 +8,7 @@ import {
     SLASH_COMMANDS,
     toolAction,
     toolActionOptions,
+    toolDisplayName,
     toolUninstallAction,
     visibleWindowStart
 } from './state.mjs';
@@ -36,7 +37,7 @@ const TOOL_LABELS = {
 };
 
 function toolLabel(row) {
-    return TOOL_LABELS[row.command] ?? row.command;
+    return TOOL_LABELS[row.command] ?? toolDisplayName(row.command);
 }
 
 function truncate(value, width) {
@@ -71,6 +72,13 @@ function statusCounts(rows) {
         counts[row.status] = (counts[row.status] ?? 0) + 1;
         return counts;
     }, {});
+}
+
+export function transcriptLineCount(entries = []) {
+    return entries.reduce((count, entry) => {
+        const text = String(entry?.text ?? '');
+        return count + text.split('\n').length;
+    }, 0);
 }
 
 function replaceToolRow(rows, row) {
@@ -567,8 +575,9 @@ export function App({
         () => transcriptLimit > 0 ? messages.slice(-transcriptLimit) : [],
         [messages, transcriptLimit]
     );
+    const transcriptLines = transcriptLineCount(transcript);
     const extraStatusLines = busy ? 1 : 0;
-    const visibleRows = Math.max(1, mainHeight - transcript.length - extraStatusLines - 2);
+    const visibleRows = Math.max(1, mainHeight - transcriptLines - extraStatusLines - 2);
 
     return h(Box, {flexDirection: 'column', height, width},
         h(WelcomePanel, {

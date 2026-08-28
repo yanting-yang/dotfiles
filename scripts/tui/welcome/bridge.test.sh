@@ -194,6 +194,14 @@ case "${STATUS_LATEST_CURL_MODE:-}" in
     stow-fallback)
         exit 22
         ;;
+    texlive-range)
+        printf '%s\n' \
+            'name 00texlive.config' \
+            'category TLCore' \
+            'depend release/2026' \
+            '' \
+            'name 00texlive.image'
+        ;;
     *)
         exit 92
         ;;
@@ -279,6 +287,23 @@ chmod +x "$TMP_DIR/latest-bin/curl" "$TMP_DIR/latest-bin/git"
     [ "$(sed -n '1p' "$STATUS_LATEST_GIT_LOG")" = \
         'ls-remote --tags --refs https://github.com/aspiers/stow.git v*' ]
     [ "$(wc -l <"$STATUS_LATEST_GIT_LOG")" -eq 1 ]
+
+    texlive_cache="$TMP_DIR/texlive-cache"
+    mkdir -p "$texlive_cache"
+    : >"$STATUS_LATEST_CURL_LOG"
+    STATUS_LATEST_CURL_MODE=texlive-range
+    export STATUS_LATEST_CURL_MODE
+    texlive_latest=$(WELCOME_UPDATE_CACHE_DIR="$texlive_cache" get_texlive_latest)
+    [ "$texlive_latest" = "2026" ]
+    [ "$(sed -n '1p' "$STATUS_LATEST_CURL_LOG")" = \
+        '-fsSL --range 0-16383 --max-filesize 32768 --max-time 20 https://mirror.ctan.org/systems/texlive/tlnet/tlpkg/texlive.tlpdb' ]
+    [ "$(wc -l <"$STATUS_LATEST_CURL_LOG")" -eq 1 ]
+    IFS= read -r texlive_cached <"$texlive_cache/texlive.latest"
+    [ "$texlive_cached" = "2026" ]
+
+    texlive_latest=$(WELCOME_UPDATE_CACHE_DIR="$texlive_cache" get_texlive_latest)
+    [ "$texlive_latest" = "2026" ]
+    [ "$(wc -l <"$STATUS_LATEST_CURL_LOG")" -eq 1 ]
 )
 
 mkdir -p "$TMP_DIR/home" "$TMP_DIR/bin"
@@ -351,7 +376,7 @@ status_record_completed_row() {
 load_rows 1 status_record_completed_row
 
 mapfile -t status_callback_rows <"$STATUS_ROW_CALLBACK_LOG"
-expected_callback_commands=(code gh nvim nvm node stow tmux cat-tmux kitty maple)
+expected_callback_commands=(code gh nvim nvm node stow tmux cat-tmux kitty latex maple)
 [ "${#status_callback_rows[@]}" -eq "${#expected_callback_commands[@]}" ]
 for i in "${!expected_callback_commands[@]}"; do
     IFS='|' read -r callback_count callback_command callback_latest callback_status \
@@ -373,6 +398,12 @@ load_rows 0
 [ ! -s "$STATUS_REMOTE_CHECK_LOG" ]
 [ "${COMMANDS[0]}|${LATESTS[0]}|${STATUSES[0]}" = 'code|unchecked|installed' ]
 [ "${COMMANDS[1]}|${LATESTS[1]}|${STATUSES[1]}" = 'gh|unchecked|installed' ]
+[ "${COMMANDS[9]}|${LATESTS[9]}|${STATUSES[9]}" = 'latex|unchecked|missing' ]
+row_is_actionable 9
+if row_is_uninstallable 9; then
+    printf 'missing LaTeX unexpectedly exposed an uninstall action\n' >&2
+    exit 1
+fi
 
 # The real status exporter must forward those callbacks as newline-delimited
 # events instead of buffering until every row is ready. Keep the subprocess
@@ -405,8 +436,8 @@ mapfile -t status_stream_events < <(
         WELCOME_UPDATE_CACHE_DIR= \
         /bin/bash "$ROOT_DIR/scripts/tui/welcome/status.sh" tools --updates --stream
 )
-[ "${#status_stream_events[@]}" -eq 11 ]
-for i in {0..9}; do
+[ "${#status_stream_events[@]}" -eq 12 ]
+for i in {0..10}; do
     [[ "${status_stream_events[$i]}" == '{"kind":"tool-row","row":'* ]]
 done
 [[ "${status_stream_events[0]}" == *'"command":"code"'* ]]
@@ -414,7 +445,7 @@ done
 [[ "${status_stream_events[0]}" == *'"status":"update"'* ]]
 [[ "${status_stream_events[1]}" == *'"command":"gh"'* ]]
 [[ "${status_stream_events[1]}" == *'"latest":"2.1.0"'* ]]
-[ "${status_stream_events[10]}" = '{"kind":"tools-complete","includeUpdates":true}' ]
+[ "${status_stream_events[11]}" = '{"kind":"tools-complete","includeUpdates":true}' ]
 mapfile -t status_stream_curl_calls <"$STATUS_STREAM_CURL_LOG"
 [ "${#status_stream_curl_calls[@]}" -eq 2 ]
 [ "${status_stream_curl_calls[0]}" = \
@@ -432,6 +463,83 @@ status_local_json=$(
 )
 [[ "$status_local_json" == '{"kind":"tools","includeUpdates":false,"rows":['* ]]
 [[ "$status_local_json" != *$'\n'* ]]
+
+# LaTeX reports the annual TeX Live release, checks CTAN only when explicitly
+# requested, and never offers a downgrade when the local release is newer.
+mkdir -p "$TMP_DIR/latex-bin"
+cat >"$TMP_DIR/latex-bin/latex" <<'SCRIPT'
+#!/bin/sh
+printf 'pdfTeX 3.141592653 (TeX Live %s)\n' "$FAKE_TEXLIVE_YEAR"
+SCRIPT
+cat >"$TMP_DIR/latex-bin/tlmgr" <<'SCRIPT'
+#!/bin/sh
+printf 'tlmgr revision 12345\n'
+printf 'TeX Live (https://tug.org/texlive) version %s\n' "$FAKE_TEXLIVE_YEAR"
+SCRIPT
+chmod +x "$TMP_DIR/latex-bin/latex" "$TMP_DIR/latex-bin/tlmgr"
+ln -s "$(PATH="$ORIGINAL_PATH" command -v sed)" "$TMP_DIR/bin/sed"
+
+TEXLIVE_REMOTE_LOG="$TMP_DIR/texlive-remote.log"
+: >"$TEXLIVE_REMOTE_LOG"
+TEXLIVE_REMOTE_YEAR=2026
+get_texlive_latest() {
+    printf 'check\n' >>"$TEXLIVE_REMOTE_LOG"
+    printf '%s' "$TEXLIVE_REMOTE_YEAR"
+}
+
+status_assert_latex_row() {
+    local expected_current="$1" expected_latest="$2" expected_status="$3" i
+
+    STATUS_LATEX_INDEX=-1
+    for i in "${!COMMANDS[@]}"; do
+        if [ "${COMMANDS[$i]}" = "latex" ]; then
+            STATUS_LATEX_INDEX="$i"
+            break
+        fi
+    done
+
+    [ "$STATUS_LATEX_INDEX" -ge 0 ]
+    [ "${PATHS[$STATUS_LATEX_INDEX]}" != "not installed" ]
+    [ "${CURRENTS[$STATUS_LATEX_INDEX]}" = "$expected_current" ]
+    [ "${LATESTS[$STATUS_LATEX_INDEX]}" = "$expected_latest" ]
+    [ "${STATUSES[$STATUS_LATEX_INDEX]}" = "$expected_status" ]
+    if row_is_uninstallable "$STATUS_LATEX_INDEX"; then
+        printf 'LaTeX unexpectedly exposed an uninstall action\n' >&2
+        return 1
+    fi
+}
+
+PATH="$TMP_DIR/latex-bin:$TMP_DIR/bin"
+FAKE_TEXLIVE_YEAR=2025
+export FAKE_TEXLIVE_YEAR
+load_rows 0
+status_assert_latex_row 2025 unchecked installed
+[ ! -s "$TEXLIVE_REMOTE_LOG" ]
+
+load_rows 1
+status_assert_latex_row 2025 2026 update
+[ "$(PATH="$ORIGINAL_PATH" wc -l <"$TEXLIVE_REMOTE_LOG")" -eq 1 ]
+row_is_actionable "$STATUS_LATEX_INDEX"
+
+FAKE_TEXLIVE_YEAR=2026
+load_rows 1
+status_assert_latex_row 2026 2026 current
+[ "$(PATH="$ORIGINAL_PATH" wc -l <"$TEXLIVE_REMOTE_LOG")" -eq 2 ]
+if row_is_actionable "$STATUS_LATEX_INDEX"; then
+    printf 'current LaTeX unexpectedly exposed an update action\n' >&2
+    exit 1
+fi
+
+FAKE_TEXLIVE_YEAR=2027
+load_rows 1
+status_assert_latex_row 2027 2026 current
+[ "$(PATH="$ORIGINAL_PATH" wc -l <"$TEXLIVE_REMOTE_LOG")" -eq 3 ]
+if row_is_actionable "$STATUS_LATEX_INDEX"; then
+    printf 'LaTeX offered a downgrade to an older TeX Live release\n' >&2
+    exit 1
+fi
+
+PATH="$TMP_DIR/bin"
 
 # Exercise Node's real status-row path before the action tests replace
 # load_rows with focused fixtures.
@@ -666,6 +774,70 @@ row_is_actionable() {
 
 welcome_run_tool_installer fake 0 >/dev/null
 [ "$(cat "$fake_marker")" = "yes" ]
+
+# A successful LaTeX action activates the installer's stable TeX Live path in
+# this parent shell, so the next Welcome render can observe it immediately.
+fake_latex_installer="$TMP_DIR/fake-latex-installer.sh"
+cat >"$fake_latex_installer" <<'SCRIPT'
+#!/usr/bin/env bash
+set -e
+if [ "${FAKE_LATEX_FAIL:-0}" -eq 1 ]; then
+    printf 'specific LaTeX installer failure\n' >&2
+    exit 37
+fi
+mkdir -p "$TEXLIVE_ROOT/current/bin/x86_64-linux"
+: >"$TEXLIVE_ROOT/current/bin/x86_64-linux/latex"
+chmod +x "$TEXLIVE_ROOT/current/bin/x86_64-linux/latex"
+SCRIPT
+chmod +x "$fake_latex_installer"
+
+load_rows() {
+    COMMANDS=("latex")
+    PATHS=("not installed")
+    CURRENTS=("unknown")
+    LATESTS=("2026")
+    INSTALLERS=("$fake_latex_installer")
+    STATUSES=("missing")
+}
+
+TEXLIVE_ROOT="$TMP_DIR/fake-texlive"
+export TEXLIVE_ROOT
+PATH="$ORIGINAL_PATH"
+welcome_run_tool_installer latex 0 >/dev/null
+[ "${PATH%%:*}" = "$TEXLIVE_ROOT/current/bin/x86_64-linux" ]
+
+latex_action_file="$TMP_DIR/latex-action.env"
+latex_result_file="$TMP_DIR/latex-result.txt"
+latex_live_output="$TMP_DIR/latex-live-output.txt"
+printf '%s\n' \
+    'ACTION=install_tool' \
+    'COMMAND=latex' \
+    'INCLUDE_UPDATES=0' \
+    'VIEW=tools' >"$latex_action_file"
+
+FAKE_LATEX_FAIL=1
+export FAKE_LATEX_FAIL
+welcome_execute_action_file "$latex_action_file" "$latex_result_file" \
+    >"$latex_live_output"
+grep -Fq 'specific LaTeX installer failure' "$latex_live_output"
+grep -Fq 'specific LaTeX installer failure' "$latex_result_file"
+grep -Fq 'Action failed with exit 37.' "$latex_result_file"
+if grep -Fq 'Installer output was shown in the terminal.' "$latex_result_file"; then
+    printf 'failed LaTeX action discarded its diagnostic output\n' >&2
+    exit 1
+fi
+
+FAKE_LATEX_FAIL=0
+export FAKE_LATEX_FAIL
+TEXLIVE_ROOT="$TMP_DIR/fake-texlive-action"
+PATH="$ORIGINAL_PATH"
+welcome_execute_action_file "$latex_action_file" "$latex_result_file" \
+    >"$latex_live_output"
+[ "${PATH%%:*}" = "$TEXLIVE_ROOT/current/bin/x86_64-linux" ]
+grep -Fq 'Action completed.' "$latex_result_file"
+unset TEXLIVE_ROOT
+unset FAKE_LATEX_FAIL
+PATH="$ORIGINAL_PATH"
 
 FAKE_NVM_LOG="$TMP_DIR/fake-nvm.log"
 FAKE_NODE_CURRENT=""
