@@ -5,6 +5,9 @@
 # Existing files/folders at the destination are deleted before the symlink is
 # created. Existing symlinks that already point at the right place are left
 # alone.
+#
+# Submodules (e.g. the catppuccin tmux theme) are checked out first, so a plain
+# "git clone" of this repo works as well as "git clone --recurse-submodules".
 
 set -euo pipefail
 
@@ -17,6 +20,21 @@ LINKS=(
   ".zprofile"
   ".zshrc"
 )
+
+# Equivalent to having cloned with --recurse-submodules.
+init_submodules() {
+  if [ ! -f "$DOTFILES_DIR/.gitmodules" ]; then
+    return
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "warn:  git not found, skipping submodules"
+    return
+  fi
+
+  echo "sub:   git submodule update --init --recursive"
+  git -C "$DOTFILES_DIR" submodule update --init --recursive
+}
 
 link() {
   local rel="$1"
@@ -43,6 +61,8 @@ link() {
   ln -s "$src" "$dest"
   echo "link:  $dest -> $src"
 }
+
+init_submodules
 
 for rel in "${LINKS[@]}"; do
   link "$rel"
