@@ -18,6 +18,7 @@ LINKS=(
   ".config/kitty"
   ".config/nvim"
   ".config/tmux"
+  ".ssh/config"
   ".zprofile"
   ".zshrc"
 )
