@@ -12,6 +12,7 @@ DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Relative paths inside the repo; each is linked to $HOME/<same path>.
 LINKS=(
+  ".config/kitty"
   ".config/tmux"
   ".zprofile"
   ".zshrc"
