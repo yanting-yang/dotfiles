@@ -2,9 +2,9 @@
 #
 # bootstrap.sh - symlink dotfiles into $HOME
 #
-# Existing files/folders at the destination are moved aside to <name>.bak
-# before the symlink is created. Existing symlinks that already point at the
-# right place are left alone.
+# Existing files/folders at the destination are deleted before the symlink is
+# created. Existing symlinks that already point at the right place are left
+# alone.
 
 set -euo pipefail
 
@@ -35,12 +35,8 @@ link() {
 
   # -e is false for a broken symlink, so check -L too.
   if [ -e "$dest" ] || [ -L "$dest" ]; then
-    local backup="$dest.bak"
-    if [ -e "$backup" ] || [ -L "$backup" ]; then
-      backup="$dest.bak.$(date +%Y%m%d%H%M%S)"
-    fi
-    mv "$dest" "$backup"
-    echo "moved: $dest -> $backup"
+    rm -rf "$dest"
+    echo "rm:    $dest"
   fi
 
   mkdir -p "$(dirname "$dest")"
