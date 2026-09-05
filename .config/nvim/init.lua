@@ -7,8 +7,3 @@ vim.opt.shiftwidth = 4
 vim.opt.signcolumn = "yes"
 vim.opt.tabstop = 4
 vim.opt.relativenumber = true
-
-vim.pack.add({
-    { src = "https://github.com/catppuccin/nvim", name = "catppuccin" }
-})
-vim.cmd.colorscheme("catppuccin-nvim")
