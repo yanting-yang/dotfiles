@@ -1,1 +1,1 @@
-source "$HOME/.bashrc"
+exec /usr/bin/zsh -l
