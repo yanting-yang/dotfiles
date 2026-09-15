@@ -1,1 +1,1 @@
-exec zsh -l
+[[ $- == *i* ]] && exec zsh -l
