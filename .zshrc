@@ -5,7 +5,7 @@ export ZSH="$HOME/.oh-my-zsh"
 ZSH_COMPDUMP="$ZSH/cache/.zcompdump-$ZSH_VERSION"
 # Lmod exports FPATH, so nested shells re-prepend omz dirs; dedupe to keep the dump stable.
 typeset -U fpath
-ZSH_THEME="robbyrussell"
+ZSH_THEME="agnoster"
 plugins=(ssh timer)
 source $ZSH/oh-my-zsh.sh
 
