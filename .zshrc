@@ -1,13 +1,22 @@
 export TZ="America/Vancouver"
 export PATH="$HOME/.local/bin:$PATH"
 export ZSH="$HOME/.oh-my-zsh"
+
 # One completion dump shared by all nodes, instead of a per-host ~/.zcompdump-<host>-<ver>.
 ZSH_COMPDUMP="$ZSH/cache/.zcompdump-$ZSH_VERSION"
 # Lmod exports FPATH, so nested shells re-prepend omz dirs; dedupe to keep the dump stable.
 typeset -U fpath
+
 ZSH_THEME="agnoster"
 plugins=(ssh timer)
 source $ZSH/oh-my-zsh.sh
+
+# Lead the prompt with the Slurm cluster name, since login nodes everywhere are named like login01.
+# Exported so nested shells (tmux, srun) skip the scontrol call.
+if (( $+commands[scontrol] )); then
+    export CLUSTER_NAME=${CLUSTER_NAME:-${"$(scontrol show config 2>/dev/null | grep '^ClusterName')"##* }}
+    [[ -n $CLUSTER_NAME ]] && PROMPT="%K{magenta}%F{black} $CLUSTER_NAME %k%F{magenta}"$'\ue0b0'"%f$PROMPT"
+fi
 
 ssht() {
     command ssh "$@"
