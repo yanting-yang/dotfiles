@@ -18,21 +18,23 @@ ssht() {
 compdef ssht=ssh
 alias ssh='ssht'
 
-# One tmux pane per Alliance cluster; answer each Duo prompt with "1" (push).
+# One tmux pane per Alliance cluster, four to a window, plus a window running sqtop;
+# answer each Duo prompt with "1" (push).
 alliance() {
     local session=alliance
     local -a hosts=(fir narval nibi rorqual trillium-gpu killarney tamia vulcan)
     if ! tmux has-session -t "=$session" 2>/dev/null; then
-        local -a rows=($(tmux new-session -d -s "$session" -P -F '#{pane_id}')) panes
-        repeat $(( $#hosts / 2 - 1 )); do
-            rows+=($(tmux split-window -v -t "$rows[-1]" -P -F '#{pane_id}'))
-            # Even out after every split so the next one still has room.
-            tmux select-layout -t "$session" even-vertical
-        done
-        # Halve each row so hosts fill left-to-right, top-to-bottom: 1 2 / 3 4 / 5 6 / 7 8.
-        local row i
-        for row in $rows; do
-            panes+=($row $(tmux split-window -h -t "$row" -P -F '#{pane_id}'))
+        local -a panes=($(tmux new-session -d -s "$session" -P -F '#{pane_id}'))
+        local i
+        for i in {2..$#hosts}; do
+            if (( i % 4 == 1 )); then
+                panes+=($(tmux new-window -d -t "$session:" -P -F '#{pane_id}'))
+            else
+                panes+=($(tmux split-window -t "$panes[-1]" -P -F '#{pane_id}'))
+                # Tile after every split: it leaves room for the next one, and four tiled panes
+                # sit left-to-right, top-to-bottom in host order: 0 1 / 2 3.
+                tmux select-layout -t "$panes[-1]" tiled
+            fi
         done
         for i in {1..$#hosts}; do
             tmux send-keys -t "$panes[i]" "ssh $hosts[i]" Enter
@@ -48,6 +50,8 @@ alliance() {
                 done
             ) &!
         done
+        # sqtop never prompts for MFA; its remote tabs reuse the ssh connections opened above.
+        tmux send-keys -t "$(tmux new-window -d -t "$session:" -P -F '#{pane_id}')" 'uvx sqtop' Enter
     fi
     if [[ -n $TMUX ]]; then
         tmux switch-client -t "=$session"
