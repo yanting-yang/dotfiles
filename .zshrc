@@ -9,6 +9,7 @@ typeset -U fpath
 
 ZSH_THEME="agnoster"
 plugins=(ssh timer)
+zstyle ':omz:update' mode auto
 source $ZSH/oh-my-zsh.sh
 
 # Lead the prompt with the Slurm cluster name, since login nodes everywhere are named like login01.
